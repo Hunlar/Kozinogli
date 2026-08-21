@@ -1,1 +1,1 @@
-# telegram-casino-bot
+# telegram-casino
