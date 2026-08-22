@@ -1,4 +1,3 @@
-# bot/handlers/games/blackjack.py
 import random
 import asyncio
 from aiogram import Router, F
@@ -17,7 +16,6 @@ class BlackjackStates(StatesGroup):
     BET = State()
     PLAYER_TURN = State()
 
-# Эмодзи для карт
 CARD_EMOJIS = {
     '♠': '♠️', '♥': '♥️', '♦': '♦️', '♣': '♣️',
     'J': '🃏', 'Q': '👑', 'K': '🤴', 'A': '🅰️'
@@ -31,7 +29,6 @@ def get_card_emoji(card: tuple) -> str:
 async def calculate_hand(hand: list) -> int:
     total = sum(card[1] for card in hand)
     aces = sum(1 for card in hand if card[0].startswith('A'))
-
     while total > 21 and aces > 0:
         total -= 10
         aces -= 1
@@ -51,10 +48,7 @@ async def render_hand(hand: list, hide_second: bool = False) -> str:
     if len(hand) >= 1:
         parts.append(get_card_emoji(hand[0]))
     if len(hand) >= 2:
-        if hide_second:
-            parts.append('🂠')
-        else:
-            parts.append(get_card_emoji(hand[1]))
+        parts.append('🂠' if hide_second else get_card_emoji(hand[1]))
     for card in hand[2:]:
         parts.append(get_card_emoji(card))
     return ' '.join(parts)
@@ -62,75 +56,55 @@ async def render_hand(hand: list, hide_second: bool = False) -> str:
 @router.message(F.text == "🃏Blackjack🃏")
 async def start_blackjack(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        "💰 Сделайте ставку (или '🔙 Назад' для отмены):",
-        reply_markup=bet_kb()
-    )
+    await message.answer("💰 Сделайте ставку:", reply_markup=bet_kb())
     await state.set_state(BlackjackStates.BET)
 
 @router.message(BlackjackStates.BET, F.text == "🔙 Назад")
 async def cancel_bet(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        "❌ Ставка отменена",
-        reply_markup=games_menu()
-    )
+    await message.answer("❌ Ставка отменена", reply_markup=games_menu())
 
 @router.message(BlackjackStates.BET)
 async def process_bet(message: Message, state: FSMContext):
-    # Обработка кнопки "Назад"
     if message.text == "🔙 Назад":
         await cancel_bet(message, state)
         return
-
-    # Проверка на число
     try:
         bet = float(message.text.replace("₽", "").strip())
         if bet <= 0:
-            await state.clear()
-            await message.answer(
-                "❌ Ставка должна быть больше нуля! Игра отменена",
-                reply_markup=games_menu()
-            )
-            return
+            raise ValueError
     except ValueError:
         await state.clear()
-        await message.answer(
-            "❌ Некорректная сумма! Игра отменена",
-            reply_markup=games_menu()
-        )
+        await message.answer("❌ Некорректная сумма!", reply_markup=games_menu())
         return
 
-    # Проверка баланса
     async with AsyncSessionLocal() as session:
         user = (await session.execute(select(User).where(User.tg_id == message.from_user.id))).scalar()
-
         if not user:
+            await message.answer("❌ Ошибка пользователя!", reply_markup=games_menu())
             await state.clear()
-            await message.answer("❌ Вы не зарегистрированы!", reply_markup=games_menu())
+            return
+        if user.balance < bet:
+            await message.answer("❌ Недостаточно средств!", reply_markup=games_menu())
+            await state.clear()
             return
 
-        if user.balance < bet:
-            await state.clear()
-            await message.answer(
-                "❌ Недостаточно средств! Игра отменена",
-                reply_markup=games_menu()
-            )
-            return
+        # СПИСЫВАЕМ СТАВКУ СРАЗУ
+        user.balance -= bet
+        await session.commit()
 
         deck = create_deck()
         player_hand = [deck.pop(), deck.pop()]
         dealer_hand = [deck.pop(), deck.pop()]
-
-        await state.update_data(
-            bet=bet,
-            player_hand=player_hand,
-            dealer_hand=dealer_hand,
-            deck=deck,
-            message_id=None
-        )
+        await state.update_data(bet=bet, player_hand=player_hand, dealer_hand=dealer_hand, deck=deck)
 
         player_total = await calculate_hand(player_hand)
+        
+        # Проверка на мгновенный Blackjack
+        if player_total == 21:
+            await end_game(message, state, instant_blackjack=True)
+            return
+
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Взять карту", callback_data="hit")],
             [InlineKeyboardButton(text="⛔ Остановиться", callback_data="stand")]
@@ -154,8 +128,8 @@ async def player_action(callback: CallbackQuery, state: FSMContext):
     if callback.data == "hit":
         player_hand.append(deck.pop())
         await state.update_data(player_hand=player_hand, deck=deck)
-
         player_total = await calculate_hand(player_hand)
+        
         if player_total > 21:
             await end_game(callback, state, busted=True)
             return
@@ -174,15 +148,13 @@ async def player_action(callback: CallbackQuery, state: FSMContext):
     else:
         dealer_hand = data["dealer_hand"]
         dealer_total = await calculate_hand(dealer_hand)
-
         while dealer_total < 17:
             dealer_hand.append(deck.pop())
             dealer_total = await calculate_hand(dealer_hand)
-
         await state.update_data(dealer_hand=dealer_hand)
         await end_game(callback, state)
 
-async def end_game(callback: CallbackQuery, state: FSMContext, busted: bool = False):
+async def end_game(event, state: FSMContext, busted: bool = False, instant_blackjack: bool = False):
     data = await state.get_data()
     player_hand = data["player_hand"]
     dealer_hand = data["dealer_hand"]
@@ -191,56 +163,68 @@ async def end_game(callback: CallbackQuery, state: FSMContext, busted: bool = Fa
     player_total = await calculate_hand(player_hand)
     dealer_total = await calculate_hand(dealer_hand)
 
-    result = ""
-    payout = 0
-
-    if busted:
-        result = "💥 Перебор! Дилер побеждает"
-        payout = -bet
-    elif dealer_total > 21:
-        result = "🎉 Дилер перебрал! Вы победили"
-        payout = bet * 1.5
-    elif player_total > dealer_total:
-        result = "🎉 Вы победили!"
-        payout = bet * 1.5
-    elif player_total < dealer_total:
-        result = "💼 Дилер побеждает"
-        payout = -bet
-    else:
-        result = "🤝 Ничья!"
-        payout = 0
-
     async with AsyncSessionLocal() as session:
-        user = (await session.execute(select(User).where(User.tg_id == callback.from_user.id))).scalar()
+        user = (await session.execute(select(User).where(User.tg_id == event.from_user.id))).scalar()
+
+        if instant_blackjack:
+            result = "🎉 BLACKJACK! x2.5 выплата!"
+            payout = bet * 2.5
+        elif busted:
+            result = "💥 Перебор! Вы проиграли"
+            payout = 0
+        elif dealer_total > 21:
+            result = "🎉 Дилер перебрал! Вы победили"
+            payout = bet * 2
+        elif player_total > dealer_total:
+            result = "🎉 Вы победили!"
+            payout = bet * 2
+        elif player_total < dealer_total:
+            result = "💼 Дилер побеждает"
+            payout = 0
+        else:
+            result = "🤝 Ничья! Возврат ставки"
+            payout = bet
+
         user.balance += payout
         await session.commit()
 
-    # Анимация открытия карт дилера
-    revealed_cards = []
-    for i in range(len(dealer_hand)):
-        revealed_cards = dealer_hand[:i + 1]
-        await callback.message.edit_text(
-            f"💼 Карты дилера:\n{await render_hand(revealed_cards)}\n"
-            f"➖ Сумма: {await calculate_hand(revealed_cards) if i > 0 else '?'}\n\n"
-            f"🃏 Ваши карты:\n{await render_hand(player_hand)}\n"
-            f"➖ Сумма: {player_total}"
-        )
-        await asyncio.sleep(0.8)
+        # Анимация открытия карт дилера
+        for i in range(len(dealer_hand)):
+            revealed = dealer_hand[:i+1]
+            try:
+                await event.message.edit_text(
+                    f"💼 Карты дилера:\n{await render_hand(revealed)}\n"
+                    f"➖ Сумма: {await calculate_hand(revealed) if i > 0 else '?'}\n\n"
+                    f"🃏 Ваши карты:\n{await render_hand(player_hand)}\n"
+                    f"➖ Сумма: {player_total}"
+                )
+                await asyncio.sleep(0.8)
+            except Exception:
+                pass
 
-    await callback.message.edit_text(
-        f"{result}\n\n"
-        f"💼 Карты дилера:\n{await render_hand(dealer_hand)}\n"
-        f"➖ Сумма: {dealer_total}\n\n"
-        f"🃏 Ваши карты:\n{await render_hand(player_hand)}\n"
-        f"➖ Сумма: {player_total}\n\n"
-        f"💵 Изменение баланса: {payout:.2f} ₽\n"
-        f"💰 Текущий баланс: {user.balance:.2f} ₽",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Играть снова", callback_data="restart")]
-        ])
-    )
+        try:
+            await event.message.edit_text(
+                f"{result}\n\n"
+                f"💼 Карты дилера:\n{await render_hand(dealer_hand)}\n"
+                f"➖ Сумма: {dealer_total}\n\n"
+                f"🃏 Ваши карты:\n{await render_hand(player_hand)}\n"
+                f"➖ Сумма: {player_total}\n\n"
+                f"💵 Изменение: +{payout - bet:.2f} ₽\n"
+                f"💰 Баланс: {user.balance:.2f} ₽",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Играть снова", callback_data="bj_restart")]
+                ])
+            )
+        except Exception:
+            await event.message.answer(
+                f"{result}\n💰 Баланс: {user.balance:.2f} ₽",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Играть снова", callback_data="bj_restart")]
+                ])
+            )
     await state.clear()
 
-@router.callback_query(F.data == "restart")
+@router.callback_query(F.data == "bj_restart")
 async def restart_game(callback: CallbackQuery, state: FSMContext):
+    await callback.message.delete()
     await start_blackjack(callback.message, state)
