@@ -127,7 +127,7 @@ tg-bot/
 
 - **Python 3.10+**
 - **aiogram 3.x** — асинхронный фреймворк для Telegram Bot API
-- **SQLAlchemy 2.0 + aiosqlite** — асинхронная ORM и база данных SQLite /h
+- **SQLAlchemy 2.0 + aiosqlite** — асинхронная ORM и база данных SQLite /
 - **aiogram FSM** — машина состояний для пошаговых процессов и игр
 
 ## 📄 Лицензия
