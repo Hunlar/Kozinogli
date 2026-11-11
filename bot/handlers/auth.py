@@ -4,14 +4,13 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 
 from sqlalchemy import select
 
 from db.database import AsyncSessionLocal
 from db.models import User
-from bot.keyboards import main_menu
 
 
 router = Router()
@@ -59,10 +58,10 @@ async def start_command(
 
             welcome_text = (
                 "🎰 ÖzVeGas'a hoş geldin!\n\n"
-                "🪙 İlk günlük kredin hesabına eklendi: "
+                "🪙 İlk kredin hesabına eklendi: "
                 "20.000 Sanal Kredi\n\n"
-                "🎮 Oyunlar ücretsizdir.\n"
-                "Bol şans!"
+                "🎮 Oyunları komutlarla başlatabilirsin.\n"
+                "Yardım için /help yaz."
             )
 
         else:
@@ -71,19 +70,20 @@ async def start_command(
                 "🎰 ÖzVeGas'a tekrar hoş geldin!\n\n"
                 f"🪙 Bakiyen: {(user.balance or 0):,.2f} "
                 "Sanal Kredi\n\n"
-                "🎮 İyi eğlenceler!"
+                "🎮 Oyunları komutlarla başlatabilirsin.\n"
+                "Yardım için /help yaz."
             )
 
         if telegram_id == BANK_OWNER_TG_ID:
             welcome_text += (
-                "\n\n🏦 **ÖzVeGas Kasası sahibi olarak "
-                "tanımlandın.**"
+                "\n\n🏦 ÖzVeGas Kasası sahibi olarak "
+                "tanımlandın."
             )
 
         await session.commit()
 
     await message.answer(
         welcome_text,
-        reply_markup=main_menu(user_id=telegram_id),
-        parse_mode="Markdown"
+        reply_markup=ReplyKeyboardRemove()
     )
+    
