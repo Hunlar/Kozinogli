@@ -10,20 +10,12 @@ from db.models import User
 BANKRUPTCY_LIMIT = 4000
 
 
-# Bahis yatırıldıktan sonra tamamlanmasına izin verilen oyun durumları.
 ACTIVE_GAME_STATES = {
-    # Blackjack
     "BlackjackStates:PLAYER_TURN",
-
-    # Mayınlar
     "MinesStates:CHOOSE_MINES",
     "MinesStates:PLAYING",
-
-    # Roket
     "CrashStates:COEFF_INPUT",
     "CrashStates:FLYING",
-
-    # Çift / Tek
     "EvenOddStates:CHOICE",
 }
 
@@ -37,6 +29,38 @@ class BankruptcyMiddleware(BaseMiddleware):
         if telegram_user is None:
             return await handler(event, data)
 
+        # Mesajın grup veya özel sohbet olduğunu belirle.
+        if isinstance(event, Message):
+            chat_type = event.chat.type
+
+        elif isinstance(event, CallbackQuery) and event.message:
+            chat_type = event.message.chat.type
+
+        else:
+            chat_type = None
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User).where(
+                    User.tg_id == telegram_user.id
+                )
+            )
+
+            user = result.scalar_one_or_none()
+
+            # Botu özelden başlatmamış kullanıcıyı
+            # grup oyunlarında tamamen görmezden gel.
+            if chat_type in ("group", "supergroup"):
+                if user is None or not user.has_started:
+                    return
+
+            # Özel sohbette kayıtlı olmayan kullanıcıyı
+            # mevcut handler'ın yönetmesine izin ver.
+            if user is None:
+                return await handler(event, data)
+
+            balance = user.balance or 0
+
         # Devam eden oyunun tamamlanmasına izin ver.
         fsm_state = data.get("state")
 
@@ -48,23 +72,7 @@ class BankruptcyMiddleware(BaseMiddleware):
                     return await handler(event, data)
 
             except Exception:
-                # FSM kontrolü başarısız olursa bakiye kontrolüne devam et.
                 pass
-
-        async with AsyncSessionLocal() as session:
-
-            result = await session.execute(
-                select(User).where(
-                    User.tg_id == telegram_user.id
-                )
-            )
-
-            user = result.scalar_one_or_none()
-
-            if user is None:
-                return await handler(event, data)
-
-            balance = user.balance or 0
 
         if balance < BANKRUPTCY_LIMIT:
 
