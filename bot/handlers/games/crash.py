@@ -1,31 +1,76 @@
+
 import asyncio
 import random
+
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
+)
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+
+from sqlalchemy import select
+
 from db.database import AsyncSessionLocal
 from db.models import User
-from sqlalchemy import select
+
 from bot.keyboards import games_menu, bet_kb
+from bot.utils.bankruptcy import check_bankruptcy
+
 
 router = Router()
+
 
 class CrashStates(StatesGroup):
     BET = State()
     COEFF_INPUT = State()
     FLYING = State()
 
+
 CRASH_PROBABILITY = 0.025
 MULTIPLIER_STEP = 0.01
 BASE_MULTIPLIER = 1.00
 UPDATE_INTERVAL = 0.1
 
-async def rocket_animation(message: Message, state: FSMContext, stop_event: asyncio.Event):
+
+async def refund_bet(telegram_id: int, bet: float):
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(User)
+            .where(User.tg_id == telegram_id)
+            .with_for_update()
+        )
+
+        user = result.scalar_one_or_none()
+
+        if user is not None:
+            user.balance += bet
+            await session.commit()
+
+
+async def finish_bankruptcy(message: Message):
+    await check_bankruptcy(
+        bot=message.bot,
+        telegram_id=message.from_user.id,
+        chat_id=message.chat.id,
+        chat_type=message.chat.type,
+        first_name=message.from_user.first_name or "Oyuncu"
+    )
+
+
+async def rocket_animation(
+    message: Message,
+    state: FSMContext,
+    stop_event: asyncio.Event
+):
     data = await state.get_data()
-    current_multiplier = data['multiplier']
-    bet = data['bet']
-    target_coeff = data.get('target_coeff')
+
+    current_multiplier = data["multiplier"]
+    bet = data["bet"]
+    target_coeff = data["target_coeff"]
 
     frames = [
         "🚀✨▰▰▰▰▰▰▰▰▰",
@@ -40,130 +85,356 @@ async def rocket_animation(message: Message, state: FSMContext, stop_event: asyn
         "▰▰▰▰▰▰▰▰▰🚀✨"
     ]
 
-    msg = await message.answer("Запуск...")
-    try:
-        while not stop_event.is_set():
-            current_multiplier += MULTIPLIER_STEP
-            await state.update_data(multiplier=current_multiplier)
+    animation_message = await message.answer(
+        "🚀 Roket hazırlanıyor..."
+    )
 
-            if target_coeff and current_multiplier >= target_coeff:
-                stop_event.set()
-                win = bet * current_multiplier
-                async with AsyncSessionLocal() as session:
-                    user = (await session.execute(select(User).where(User.tg_id == message.from_user.id))).scalar()
-                    user.balance += win
-                    await session.commit()
-                await msg.edit_text(
-                    f"🎉 Цель достигнута x{current_multiplier:.2f}!\n"
-                    f"💰 Выигрыш: {win:.2f} ₽\n"
-                    f"💵 Баланс: {user.balance:.2f} ₽"
+    while not stop_event.is_set():
+
+        current_multiplier = round(
+            current_multiplier + MULTIPLIER_STEP,
+            2
+        )
+
+        await state.update_data(
+            multiplier=current_multiplier
+        )
+
+        # Otomatik hedefe ulaşıldı.
+        if current_multiplier >= target_coeff:
+
+            stop_event.set()
+
+            win = bet * current_multiplier
+
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(User)
+                    .where(User.tg_id == message.from_user.id)
+                    .with_for_update()
                 )
-                await message.answer("Выберите игру:", reply_markup=games_menu())
-                await state.clear()
-                return
 
-            frame = frames[int(current_multiplier * 10) % len(frames)]
-            text = (
-                f"{frame}\n"
-                f"📈 Множитель: x{current_multiplier:.2f}\n"
-                f"💰 Потенциал: {bet * current_multiplier:.2f} ₽"
+                user = result.scalar_one_or_none()
+
+                if user is None:
+                    await state.clear()
+                    return
+
+                user.balance += win
+                balance = user.balance
+
+                await session.commit()
+
+            await animation_message.edit_text(
+                f"🎉 Hedefe ulaşıldı!\n\n"
+                f"📈 Katsayı: x{current_multiplier:.2f}\n"
+                f"💰 Kazanç: {win:,.2f} Sanal Kredi\n"
+                f"🪙 Yeni bakiye: {balance:,.2f} Sanal Kredi"
             )
-            await msg.edit_text(
-                text,
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=f"🛑 Забрать x{current_multiplier:.2f}", callback_data="cashout")]
-                ])
+
+            await finish_bankruptcy(message)
+
+            await message.answer(
+                "🎮 Başka bir oyun seçebilirsin.",
+                reply_markup=games_menu()
             )
 
-            if random.random() < CRASH_PROBABILITY:
-                await msg.edit_text(f"💥 Краш на x{current_multiplier:.2f}!")
-                await message.answer("🍀 Повезёт в следующий раз!", reply_markup=games_menu())
-                await state.clear()
-                return
+            await state.clear()
+            return
 
-            await asyncio.sleep(UPDATE_INTERVAL)
-    except asyncio.CancelledError:
-        pass
+        frame = frames[
+            int(current_multiplier * 10) % len(frames)
+        ]
 
-@router.message(F.text == "🚀Ракета🚀")
-async def start_crash(message: Message, state: FSMContext):
+        text = (
+            f"{frame}\n\n"
+            f"📈 Katsayı: x{current_multiplier:.2f}\n"
+            f"💰 Potansiyel kazanç: "
+            f"{bet * current_multiplier:,.2f} Sanal Kredi"
+        )
+
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=f"🛑 Kazancı Al x{current_multiplier:.2f}",
+                        callback_data="crash_cashout"
+                    )
+                ]
+            ]
+        )
+
+        await animation_message.edit_text(
+            text,
+            reply_markup=keyboard
+        )
+
+        # Kullanıcı bu sırada kazancını almış olabilir.
+        if stop_event.is_set():
+            return
+
+        if random.random() < CRASH_PROBABILITY:
+
+            stop_event.set()
+
+            await animation_message.edit_text(
+                f"💥 ROKET PATLADI!\n\n"
+                f"📉 Patlama katsayısı: x{current_multiplier:.2f}\n"
+                f"💸 Kaybedilen bahis: {bet:,.2f} Sanal Kredi"
+            )
+
+            await finish_bankruptcy(message)
+
+            await message.answer(
+                "🍀 Şansını tekrar dene!",
+                reply_markup=games_menu()
+            )
+
+            await state.clear()
+            return
+
+        await asyncio.sleep(UPDATE_INTERVAL)
+
+
+@router.message(F.text == "🚀 Roket")
+async def start_crash(
+    message: Message,
+    state: FSMContext
+):
     await state.clear()
-    await message.answer("💰 Введите ставку:", reply_markup=bet_kb())
+
+    await message.answer(
+        "🚀 **ROKET OYUNU**\n\n"
+        "💰 Önce bahis miktarını gir.",
+        reply_markup=bet_kb()
+    )
+
     await state.set_state(CrashStates.BET)
 
-@router.message(CrashStates.BET, F.text == "🔙 Назад")
-async def cancel_bet(message: Message, state: FSMContext):
+
+@router.message(
+    CrashStates.BET,
+    F.text == "🔙 Geri"
+)
+async def cancel_bet(
+    message: Message,
+    state: FSMContext
+):
     await state.clear()
-    await message.answer("❌ Отменено", reply_markup=games_menu())
+
+    await message.answer(
+        "❌ Roket oyunu iptal edildi.",
+        reply_markup=games_menu()
+    )
+
 
 @router.message(CrashStates.BET)
-async def process_bet(message: Message, state: FSMContext):
-    if message.text == "🔙 Назад":
-        return await cancel_bet(message, state)
+async def process_bet(
+    message: Message,
+    state: FSMContext
+):
     try:
-        bet = float(message.text.replace("₽", "").strip())
+        bet = float(
+            message.text.replace(",", ".").strip()
+        )
+
         if bet <= 0:
             raise ValueError
-    except ValueError:
-        await state.clear()
-        return await message.answer("❌ Некорректная сумма!", reply_markup=games_menu())
+
+    except (ValueError, AttributeError):
+        return await message.answer(
+            "❌ Geçersiz bahis miktarı. Tekrar dene."
+        )
 
     async with AsyncSessionLocal() as session:
-        user = (await session.execute(select(User).where(User.tg_id == message.from_user.id))).scalar()
-        if not user or user.balance < bet:
+        result = await session.execute(
+            select(User)
+            .where(User.tg_id == message.from_user.id)
+            .with_for_update()
+        )
+
+        user = result.scalar_one_or_none()
+
+        if user is None:
             await state.clear()
-            return await message.answer("❌ Недостаточно средств!", reply_markup=games_menu())
+            return await message.answer(
+                "❌ Kullanıcı hesabı bulunamadı."
+            )
+
+        if user.balance < bet:
+            await state.clear()
+            return await message.answer(
+                "❌ Yetersiz Sanal Kredi.",
+                reply_markup=games_menu()
+            )
+
         user.balance -= bet
         await session.commit()
 
     await state.update_data(bet=bet)
+
     await state.set_state(CrashStates.COEFF_INPUT)
+
     await message.answer(
-        "Введите целевой множитель (например 1.5, 2.0) или '🔙 Назад':",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Примеры: 1.5 | 2.0 | 3.0", callback_data="example")
-        ]])
+        "📈 Hedef katsayıyı gir.\n\n"
+        "Örnek: 1.5 veya 2.0 veya 3.0\n\n"
+        "🔙 İptal edersen bahis iade edilir."
     )
 
-@router.message(CrashStates.COEFF_INPUT, F.text == "🔙 Назад")
-async def cancel_coeff(message: Message, state: FSMContext):
-    # Ставка уже сгорела, возврата нет
+
+@router.message(
+    CrashStates.COEFF_INPUT,
+    F.text == "🔙 Geri"
+)
+async def cancel_coeff(
+    message: Message,
+    state: FSMContext
+):
+    data = await state.get_data()
+    bet = data.get("bet", 0)
+
+    await refund_bet(
+        message.from_user.id,
+        bet
+    )
+
     await state.clear()
-    await message.answer("❌ Игра отменена", reply_markup=games_menu())
+
+    await message.answer(
+        "❌ Oyun iptal edildi.\n"
+        "🪙 Bahsin hesabına iade edildi.",
+        reply_markup=games_menu()
+    )
+
 
 @router.message(CrashStates.COEFF_INPUT)
-async def process_coeff(message: Message, state: FSMContext):
-    if message.text == "🔙 Назад":
-        return await cancel_coeff(message, state)
+async def process_coeff(
+    message: Message,
+    state: FSMContext
+):
     try:
-        target = float(message.text.strip())
-        if target <= 1.0:
+        target = float(
+            message.text.replace(",", ".").strip()
+        )
+
+        if target <= 1.0 or target > 100:
             raise ValueError
-    except ValueError:
+
+    except (ValueError, AttributeError):
+
+        data = await state.get_data()
+        bet = data.get("bet", 0)
+
+        await refund_bet(
+            message.from_user.id,
+            bet
+        )
+
         await state.clear()
-        return await message.answer("❌ Коэффициент > 1.0!", reply_markup=games_menu())
 
-    await state.update_data(target_coeff=target, multiplier=BASE_MULTIPLIER)
+        return await message.answer(
+            "❌ Geçersiz katsayı!\n"
+            "Katsayı 1.0'dan büyük ve 100'den küçük "
+            "veya eşit olmalıdır.\n\n"
+            "🪙 Bahsin iade edildi.",
+            reply_markup=games_menu()
+        )
+
+    await state.update_data(
+        target_coeff=target,
+        multiplier=BASE_MULTIPLIER,
+        owner_id=message.from_user.id
+    )
+
     await state.set_state(CrashStates.FLYING)
-    stop_event = asyncio.Event()
-    await state.update_data(stop_event=stop_event)
-    await rocket_animation(message, state, stop_event)
 
-@router.callback_query(CrashStates.FLYING, F.data == "cashout")
-async def cashout_handler(callback: CallbackQuery, state: FSMContext):
+    stop_event = asyncio.Event()
+
+    await state.update_data(
+        stop_event=stop_event
+    )
+
+    await rocket_animation(
+        message,
+        state,
+        stop_event
+    )
+
+
+@router.callback_query(
+    CrashStates.FLYING,
+    F.data == "crash_cashout"
+)
+async def cashout_handler(
+    callback: CallbackQuery,
+    state: FSMContext
+):
     data = await state.get_data()
-    data['stop_event'].set()
-    mult = data['multiplier']
-    bet = data['bet']
-    win = bet * mult
+
+    owner_id = data.get("owner_id")
+
+    if owner_id != callback.from_user.id:
+        return await callback.answer(
+            "Bu oyun başka bir oyuncuya ait!",
+            show_alert=True
+        )
+
+    stop_event = data.get("stop_event")
+
+    if stop_event is None or stop_event.is_set():
+        return await callback.answer(
+            "Oyun sona erdi!",
+            show_alert=True
+        )
+
+    # Animasyonun devam etmesini engelle.
+    stop_event.set()
+
+    multiplier = data["multiplier"]
+    bet = data["bet"]
+    win = bet * multiplier
 
     async with AsyncSessionLocal() as session:
-        user = (await session.execute(select(User).where(User.tg_id == callback.from_user.id))).scalar()
+        result = await session.execute(
+            select(User)
+            .where(User.tg_id == callback.from_user.id)
+            .with_for_update()
+        )
+
+        user = result.scalar_one_or_none()
+
+        if user is None:
+            await state.clear()
+            return await callback.answer(
+                "Kullanıcı hesabı bulunamadı.",
+                show_alert=True
+            )
+
         user.balance += win
+        balance = user.balance
+
         await session.commit()
 
+    await callback.answer("Kazancın alındı!")
+
     await callback.message.edit_text(
-        f"🎉 Кэшаут!\n🏆 x{mult:.2f}\n💰 +{win:.2f} ₽\n💵 Баланс: {user.balance:.2f} ₽"
+        f"🎉 KAZANÇ ALINDI!\n\n"
+        f"📈 Katsayı: x{multiplier:.2f}\n"
+        f"💰 Kazanç: +{win:,.2f} Sanal Kredi\n"
+        f"🪙 Yeni bakiye: {balance:,.2f} Sanal Kredi"
     )
-    await callback.message.answer("Выберите игру:", reply_markup=games_menu())
+
+    await check_bankruptcy(
+        bot=callback.bot,
+        telegram_id=callback.from_user.id,
+        chat_id=callback.message.chat.id,
+        chat_type=callback.message.chat.type,
+        first_name=callback.from_user.first_name or "Oyuncu"
+    )
+
+    await callback.message.answer(
+        "🎮 Başka bir oyun seçebilirsin.",
+        reply_markup=games_menu()
+    )
+
     await state.clear()
