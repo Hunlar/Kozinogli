@@ -1,9 +1,11 @@
 
 import random
 import asyncio
+import math
 
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.filters import Command
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
@@ -11,7 +13,7 @@ from sqlalchemy import select
 
 from db.database import AsyncSessionLocal
 from db.models import User
-from bot.keyboards import games_menu, bet_kb
+from bot.keyboards import bet_kb
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -51,6 +53,7 @@ async def spin_animation(message: Message, final_result: list):
             pass
 
 
+@router.message(Command("slots"))
 @router.message(F.text == "💎 Slot Makinesi")
 async def start_slots(message: Message, state: FSMContext):
     await state.clear()
@@ -70,8 +73,8 @@ async def cancel_bet(message: Message, state: FSMContext):
     await state.clear()
 
     await message.answer(
-        "Oyun iptal edildi.",
-        reply_markup=games_menu()
+        "❌ Slot oyunu iptal edildi.",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -81,7 +84,7 @@ async def process_slots(message: Message, state: FSMContext):
     try:
         bet = float(message.text.replace(",", ".").strip())
 
-        if bet <= 0:
+        if not math.isfinite(bet) or bet <= 0:
             raise ValueError
 
     except (ValueError, AttributeError):
@@ -89,7 +92,7 @@ async def process_slots(message: Message, state: FSMContext):
 
         return await message.answer(
             "❌ Geçersiz bahis miktarı!",
-            reply_markup=games_menu()
+            reply_markup=ReplyKeyboardRemove()
         )
 
     async with AsyncSessionLocal() as session:
@@ -107,7 +110,7 @@ async def process_slots(message: Message, state: FSMContext):
 
             return await message.answer(
                 "❌ Kullanıcı kaydın bulunamadı. /start komutunu kullan.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
         balance = user.balance or 0
@@ -117,7 +120,7 @@ async def process_slots(message: Message, state: FSMContext):
 
             return await message.answer(
                 "❌ Bu bahis için yeterli Sanal Kredin yok.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
         # Bahis düşülür.
@@ -125,6 +128,7 @@ async def process_slots(message: Message, state: FSMContext):
 
         # Slot sonucu oluşturulur.
         symbols = list(SLOT_SYMBOLS.keys())
+
         slot_result = [
             random.choice(symbols)
             for _ in range(3)
@@ -133,11 +137,7 @@ async def process_slots(message: Message, state: FSMContext):
         await spin_animation(message, slot_result)
 
         # Mevcut çarpan sistemi korunur.
-        if (
-            slot_result[0]
-            == slot_result[1]
-            == slot_result[2]
-        ):
+        if slot_result[0] == slot_result[1] == slot_result[2]:
             multiplier = SLOT_SYMBOLS[slot_result[0]]["triple"]
 
         elif (
@@ -190,6 +190,7 @@ async def process_slots(message: Message, state: FSMContext):
         f"📊 Çarpan: x{multiplier}\n"
         f"🪙 Kazanç: {win:,.2f} Sanal Kredi\n"
         f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi",
-        reply_markup=games_menu(),
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
+    
