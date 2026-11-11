@@ -7,7 +7,25 @@ from aiogram.types import (
 from settings import ADMINS
 
 
+def create_keyboard(buttons):
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text=text)
+                for text in row
+            ]
+            for row in buttons
+        ],
+        resize_keyboard=True
+    )
+
+
+# --------------------------------------------------
+# ANA MENÜ
+# --------------------------------------------------
+
 def main_menu(user_id: int = None):
+
     buttons = [
         ["👤 Profil", "🎮 Oyunlar"],
         ["🎁 Bonuslar", "🛠 Destek"]
@@ -16,16 +34,15 @@ def main_menu(user_id: int = None):
     if user_id and user_id in ADMINS:
         buttons.append(["🛠 Admin Paneli"])
 
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=text) for text in row]
-            for row in buttons
-        ],
-        resize_keyboard=True
-    )
+    return create_keyboard(buttons)
 
+
+# --------------------------------------------------
+# ADMIN MENÜSÜ
+# --------------------------------------------------
 
 def admin_menu():
+
     buttons = [
         ["📢 Duyuru Gönder", "🪙 Sanal Kredi Ekle"],
         ["🚫 Kullanıcıyı Engelle", "🔓 Engeli Kaldır"],
@@ -33,34 +50,15 @@ def admin_menu():
         ["🚪 Admin Panelinden Çık"]
     ]
 
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=text) for text in row]
-            for row in buttons
-        ],
-        resize_keyboard=True
-    )
+    return create_keyboard(buttons)
 
 
-def mines_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="3"),
-                KeyboardButton(text="5"),
-                KeyboardButton(text="7")
-            ],
-            [
-                KeyboardButton(text="9"),
-                KeyboardButton(text="10"),
-                KeyboardButton(text="🔙 Geri")
-            ]
-        ],
-        resize_keyboard=True
-    )
-
+# --------------------------------------------------
+# OYUN MENÜSÜ
+# --------------------------------------------------
 
 def games_menu():
+
     buttons = [
         ["🎲 Çift / Tek", "💎 Slot Makinesi"],
         ["🎰 Rulet", "🃏 Blackjack", "💣 Mayınlar"],
@@ -68,128 +66,136 @@ def games_menu():
         ["🔙 Geri"]
     ]
 
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=text) for text in row]
-            for row in buttons
-        ],
-        resize_keyboard=True
-    )
+    return create_keyboard(buttons)
 
+
+# --------------------------------------------------
+# MAYINLAR
+# --------------------------------------------------
+
+def mines_keyboard():
+
+    buttons = [
+        ["3", "5", "7"],
+        ["9", "10", "🔙 Geri"]
+    ]
+
+    return create_keyboard(buttons)
+
+
+# --------------------------------------------------
+# RULET
+# --------------------------------------------------
 
 def roulette_bet_types_kb():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="🔢 Sayı"),
-                KeyboardButton(text="🎨 Renk")
-            ],
-            [
-                KeyboardButton(text="📊 Aralık"),
-                KeyboardButton(text="🔙 Geri")
-            ]
-        ],
-        resize_keyboard=True
-    )
+
+    buttons = [
+        ["🔢 Sayı", "🎨 Renk"],
+        ["📊 Aralık", "🔙 Geri"]
+    ]
+
+    return create_keyboard(buttons)
 
 
 def roulette_colors_kb():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="🔴 Kırmızı"),
-                KeyboardButton(text="⚫ Siyah")
-            ],
-            [
-                KeyboardButton(text="🟢 Yeşil"),
-                KeyboardButton(text="🔙 Geri")
-            ]
-        ],
-        resize_keyboard=True
-    )
+
+    buttons = [
+        ["🔴 Kırmızı", "⚫ Siyah"],
+        ["🟢 Yeşil", "🔙 Geri"]
+    ]
+
+    return create_keyboard(buttons)
 
 
 def roulette_ranges_kb():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="1️⃣-1️⃣2️⃣"),
-                KeyboardButton(text="1️⃣3️⃣-2️⃣4️⃣")
-            ],
-            [
-                KeyboardButton(text="2️⃣5️⃣-3️⃣6️⃣"),
-                KeyboardButton(text="🔙 Geri")
-            ]
-        ],
-        resize_keyboard=True
-    )
+
+    buttons = [
+        ["1️⃣-1️⃣2️⃣", "1️⃣3️⃣-2️⃣4️⃣"],
+        ["2️⃣5️⃣-3️⃣6️⃣", "🔙 Geri"]
+    ]
+
+    return create_keyboard(buttons)
 
 
 def roulette_numbers_kb():
+
     buttons = [
-        [KeyboardButton(text=str(i)) for i in range(0, 13)],
-        [KeyboardButton(text=str(i)) for i in range(13, 25)],
-        [KeyboardButton(text=str(i)) for i in range(25, 37)],
-        [KeyboardButton(text="🔙 Geri")]
+        [str(i) for i in range(0, 13)],
+        [str(i) for i in range(13, 25)],
+        [str(i) for i in range(25, 37)],
+        ["🔙 Geri"]
     ]
 
-    return ReplyKeyboardMarkup(
-        keyboard=buttons,
-        resize_keyboard=True
-    )
+    return create_keyboard(buttons)
 
+
+# --------------------------------------------------
+# ÇİFT / TEK
+# --------------------------------------------------
 
 def even_odd_kb():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="Çift"),
-                KeyboardButton(text="Tek")
-            ],
-            [KeyboardButton(text="🔙 Geri")]
-        ],
-        resize_keyboard=True
-    )
 
+    buttons = [
+        ["Çift", "Tek"],
+        ["🔙 Geri"]
+    ]
+
+    return create_keyboard(buttons)
+
+
+# --------------------------------------------------
+# BAHİS MENÜSÜ
+# --------------------------------------------------
 
 def bet_kb():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(text="50"),
-                KeyboardButton(text="100"),
-                KeyboardButton(text="200")
-            ],
-            [
-                KeyboardButton(text="500"),
-                KeyboardButton(text="1000")
-            ],
-            [KeyboardButton(text="🔙 Geri")]
-        ],
-        resize_keyboard=True
-    )
 
+    buttons = [
+        ["50", "100", "200"],
+        ["500", "1000"],
+        ["🔙 Geri"]
+    ]
+
+    return create_keyboard(buttons)
+
+
+# --------------------------------------------------
+# BONUS MENÜSÜ
+# --------------------------------------------------
 
 def bonuses_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🎁 Bonus Çarkı")],
-            [KeyboardButton(text="🔙 Geri")]
-        ],
-        resize_keyboard=True
-    )
+
+    buttons = [
+        ["🎁 Bonus Çarkı"],
+        ["🔙 Geri"]
+    ]
+
+    return create_keyboard(buttons)
 
 
-def top_up_menu():
+# --------------------------------------------------
+# GENEL GERİ BUTONU
+# --------------------------------------------------
+
+def back_button():
+
+    return create_keyboard([
+        ["🔙 Geri"]
+    ])
+
+
+# --------------------------------------------------
+# PROFİL
+# --------------------------------------------------
+
+def profile_menu():
+
     return back_button()
 
 
-def back_button():
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🔙 Geri")]],
-        resize_keyboard=True
-    )
+# --------------------------------------------------
+# BAKİYE MENÜSÜ
+# --------------------------------------------------
 
+def top_up_menu():
 
-def profile_menu():
     return back_button()
