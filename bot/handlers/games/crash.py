@@ -4,6 +4,7 @@ import math
 import random
 
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -11,7 +12,6 @@ from aiogram.types import (
     InlineKeyboardButton,
     ReplyKeyboardRemove
 )
-from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
@@ -20,7 +20,6 @@ from sqlalchemy import select
 from db.database import AsyncSessionLocal
 from db.models import User
 
-from bot.keyboards import bet_kb
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -50,14 +49,14 @@ async def refund_bet(telegram_id: int, bet: float):
         user = result.scalar_one_or_none()
 
         if user is not None:
-            user.balance += bet
+            user.balance = (user.balance or 0) + bet
             await session.commit()
 
 
-async def finish_bankruptcy(message: Message):
+async def finish_bankruptcy(message: Message, player_id: int):
     await check_bankruptcy(
         bot=message.bot,
-        telegram_id=message.from_user.id,
+        telegram_id=player_id,
         chat_id=message.chat.id,
         chat_type=message.chat.type,
         first_name=message.from_user.first_name or "Oyuncu"
@@ -74,22 +73,26 @@ async def rocket_animation(
     current_multiplier = data["multiplier"]
     bet = data["bet"]
     target_coeff = data["target_coeff"]
+    player_id = data["owner_id"]
 
     frames = [
         "🚀✨▰▰▰▰▰▰▰▰▰",
         "▰🚀✨▰▰▰▰▰▰▰▰",
-        "▰▰🚀✨▰▰▰▰▰▰▰",
-        "▰▰▰🚀✨▰▰▰▰▰▰",
-        "▰▰▰▰🚀✨▰▰▰▰▰",
-        "▰▰▰▰▰🚀✨▰▰▰▰",
-        "▰▰▰▰▰▰🚀✨▰▰▰",
-        "▰▰▰▰▰▰▰🚀✨▰▰",
-        "▰▰▰▰▰▰▰▰🚀✨▰",
-        "▰▰▰▰▰▰▰▰▰🚀✨"
+        "▰▰🚀✨▰▰▰▰▰▰",
+        "▰▰▰🚀✨▰▰▰▰▰",
+        "▰▰▰▰🚀✨▰▰▰▰",
+        "▰▰▰▰▰🚀✨▰▰▰",
+        "▰▰▰▰▰▰🚀✨▰▰",
+        "▰▰▰▰▰▰▰🚀✨▰",
+        "▰▰▰▰▰▰▰▰🚀✨"
     ]
 
     animation_message = await message.answer(
         "🚀 Roket hazırlanıyor..."
+    )
+
+    await state.update_data(
+        game_message_id=animation_message.message_id
     )
 
     while not stop_event.is_set():
@@ -112,7 +115,7 @@ async def rocket_animation(
             async with AsyncSessionLocal() as session:
                 result = await session.execute(
                     select(User)
-                    .where(User.tg_id == message.from_user.id)
+                    .where(User.tg_id == player_id)
                     .with_for_update()
                 )
 
@@ -122,7 +125,7 @@ async def rocket_animation(
                     await state.clear()
                     return
 
-                user.balance += win
+                user.balance = (user.balance or 0) + win
                 balance = user.balance
 
                 await session.commit()
@@ -134,7 +137,7 @@ async def rocket_animation(
                 f"🪙 Yeni bakiye: {balance:,.2f} Sanal Kredi"
             )
 
-            await finish_bankruptcy(message)
+            await finish_bankruptcy(message, player_id)
 
             await message.answer(
                 "🎮 Başka bir oyun seçebilirsin.",
@@ -160,16 +163,19 @@ async def rocket_animation(
                 [
                     InlineKeyboardButton(
                         text=f"🛑 Kazancı Al x{current_multiplier:.2f}",
-                        callback_data="crash_cashout"
+                        callback_data=f"crash_cashout:{player_id}"
                     )
                 ]
             ]
         )
 
-        await animation_message.edit_text(
-            text,
-            reply_markup=keyboard
-        )
+        try:
+            await animation_message.edit_text(
+                text,
+                reply_markup=keyboard
+            )
+        except Exception:
+            pass
 
         if stop_event.is_set():
             return
@@ -184,7 +190,7 @@ async def rocket_animation(
                 f"💸 Kaybedilen bahis: {bet:,.2f} Sanal Kredi"
             )
 
-            await finish_bankruptcy(message)
+            await finish_bankruptcy(message, player_id)
 
             await message.answer(
                 "🍀 Şansını tekrar dene!",
@@ -205,23 +211,31 @@ async def start_crash(
 ):
     await state.clear()
 
-    await message.answer(
-        "🚀 **ROKET OYUNU**\n\n"
-        "💰 Önce bahis miktarını gir.",
-        reply_markup=bet_kb()
+    await state.update_data(
+        owner_id=message.from_user.id
     )
 
     await state.set_state(CrashStates.BET)
 
+    await message.answer(
+        "🚀 **ROKET OYUNU**\n\n"
+        "💰 Bahis miktarını yaz.\n\n"
+        "İptal etmek için /iptal yaz.",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
 
-@router.message(
-    CrashStates.BET,
-    F.text == "🔙 Geri"
-)
+
+@router.message(CrashStates.BET, Command("iptal"))
 async def cancel_bet(
     message: Message,
     state: FSMContext
 ):
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
+
     await state.clear()
 
     await message.answer(
@@ -235,6 +249,11 @@ async def process_bet(
     message: Message,
     state: FSMContext
 ):
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
+
     try:
         bet = float(
             message.text.replace(",", ".").strip()
@@ -248,10 +267,12 @@ async def process_bet(
             "❌ Geçersiz bahis miktarı. Tekrar dene."
         )
 
+    player_id = data["owner_id"]
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User)
-            .where(User.tg_id == message.from_user.id)
+            .where(User.tg_id == player_id)
             .with_for_update()
         )
 
@@ -264,7 +285,7 @@ async def process_bet(
                 reply_markup=ReplyKeyboardRemove()
             )
 
-        if user.balance < bet:
+        if (user.balance or 0) < bet:
             await state.clear()
             return await message.answer(
                 "❌ Yetersiz Sanal Kredi.",
@@ -281,26 +302,25 @@ async def process_bet(
     await message.answer(
         "📈 Hedef katsayıyı gir.\n\n"
         "Örnek: 1.5 veya 2.0 veya 3.0\n\n"
-        "🔙 İptal edersen bahis iade edilir.",
+        "İptal edersen bahis iade edilir. /iptal yaz.",
         reply_markup=ReplyKeyboardRemove()
     )
 
 
-@router.message(
-    CrashStates.COEFF_INPUT,
-    F.text == "🔙 Geri"
-)
+@router.message(CrashStates.COEFF_INPUT, Command("iptal"))
 async def cancel_coeff(
     message: Message,
     state: FSMContext
 ):
     data = await state.get_data()
-    bet = data.get("bet", 0)
 
-    await refund_bet(
-        message.from_user.id,
-        bet
-    )
+    if data.get("owner_id") != message.from_user.id:
+        return
+
+    bet = data.get("bet", 0)
+    player_id = data["owner_id"]
+
+    await refund_bet(player_id, bet)
 
     await state.clear()
 
@@ -316,6 +336,11 @@ async def process_coeff(
     message: Message,
     state: FSMContext
 ):
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
+
     try:
         target = float(
             message.text.replace(",", ".").strip()
@@ -330,13 +355,10 @@ async def process_coeff(
 
     except (ValueError, AttributeError):
 
-        data = await state.get_data()
         bet = data.get("bet", 0)
+        player_id = data["owner_id"]
 
-        await refund_bet(
-            message.from_user.id,
-            bet
-        )
+        await refund_bet(player_id, bet)
 
         await state.clear()
 
@@ -350,8 +372,7 @@ async def process_coeff(
 
     await state.update_data(
         target_coeff=target,
-        multiplier=BASE_MULTIPLIER,
-        owner_id=message.from_user.id
+        multiplier=BASE_MULTIPLIER
     )
 
     await state.set_state(CrashStates.FLYING)
@@ -371,7 +392,7 @@ async def process_coeff(
 
 @router.callback_query(
     CrashStates.FLYING,
-    F.data == "crash_cashout"
+    F.data.startswith("crash_cashout:")
 )
 async def cashout_handler(
     callback: CallbackQuery,
@@ -384,6 +405,31 @@ async def cashout_handler(
     if owner_id != callback.from_user.id:
         return await callback.answer(
             "Bu oyun başka bir oyuncuya ait!",
+            show_alert=True
+        )
+
+    try:
+        callback_owner_id = int(
+            callback.data.split(":")[1]
+        )
+    except (ValueError, IndexError):
+        return await callback.answer(
+            "Geçersiz oyun bilgisi!",
+            show_alert=True
+        )
+
+    if callback_owner_id != owner_id:
+        return await callback.answer(
+            "Bu oyun başka bir oyuncuya ait!",
+            show_alert=True
+        )
+
+    if (
+        callback.message is None
+        or callback.message.message_id != data.get("game_message_id")
+    ):
+        return await callback.answer(
+            "Bu oyun mesajı artık geçerli değil!",
             show_alert=True
         )
 
@@ -404,7 +450,7 @@ async def cashout_handler(
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User)
-            .where(User.tg_id == callback.from_user.id)
+            .where(User.tg_id == owner_id)
             .with_for_update()
         )
 
@@ -417,7 +463,7 @@ async def cashout_handler(
                 show_alert=True
             )
 
-        user.balance += win
+        user.balance = (user.balance or 0) + win
         balance = user.balance
 
         await session.commit()
@@ -428,6 +474,24 @@ async def cashout_handler(
         f"🎉 KAZANÇ ALINDI!\n\n"
         f"📈 Katsayı: x{multiplier:.2f}\n"
         f"💰 Kazanç: +{win:,.2f} Sanal Kredi\n"
+        f"🪙 Yeni bakiye: {balance:,.2f} Sanal Kredi"
+    )
+
+    await check_bankruptcy(
+        bot=callback.bot,
+        telegram_id=owner_id,
+        chat_id=callback.message.chat.id,
+        chat_type=callback.message.chat.type,
+        first_name=callback.from_user.first_name or "Oyuncu"
+    )
+
+    await callback.message.answer(
+        "🎮 Başka bir oyun seçebilirsin.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    await state.clear()
+redi\n"
         f"🪙 Yeni bakiye: {balance:,.2f} Sanal Kredi"
     )
 
