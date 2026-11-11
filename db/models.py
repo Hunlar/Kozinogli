@@ -2,6 +2,7 @@
 from sqlalchemy import (
     Column,
     Integer,
+    BigInteger,
     String,
     Float,
     DateTime,
@@ -20,7 +21,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-    tg_id = Column(Integer, unique=True, nullable=False)
+    tg_id = Column(BigInteger, unique=True, nullable=False)
     is_blocked = Column(Boolean, default=False)
     login = Column(String(50), unique=True)
     password = Column(String(100))
@@ -28,10 +29,14 @@ class User(Base):
     balance = Column(Float, default=0.0)
     current_bet = Column(Float, default=0.0)
 
-    # Kullanıcının son günlük kredi aldığı tarih
     daily_credit_date = Column(Date, nullable=True)
 
-    # Eski alanlar; mevcut verilerle uyumluluk için korunuyor
+    # İflas sistemi
+    is_bankrupt = Column(Boolean, default=False)
+    bankruptcy_announced = Column(Boolean, default=False)
+    bankruptcy_chat_id = Column(BigInteger, nullable=True)
+
+    # Eski alanlar
     subscription_end = Column(DateTime, nullable=True)
     last_roulette_spin = Column(DateTime, nullable=True)
 
@@ -70,8 +75,6 @@ class BankAccount(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(50), unique=True, nullable=False)
-
-    # Kasa sınırsız olduğunda bakiyesinden düşüş yapılmaz.
     balance = Column(Float, default=0.0)
     is_unlimited = Column(Boolean, default=True)
 
@@ -81,7 +84,6 @@ class Debt(Base):
 
     id = Column(Integer, primary_key=True)
 
-    # lender_id boşsa borç veren ÖzVeGas kasasıdır.
     lender_id = Column(
         Integer,
         ForeignKey("users.id"),
