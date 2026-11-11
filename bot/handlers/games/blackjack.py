@@ -1,6 +1,6 @@
 
 import random
-import asyncio
+from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F
 from aiogram.types import (
@@ -42,9 +42,13 @@ CARD_EMOJIS = {
 
 
 def get_card_emoji(card: tuple) -> str:
-    value, suit = card[0][:-1], card[0][-1]
+    value = card[0][:-1]
+    suit = card[0][-1]
+
     emoji_value = CARD_EMOJIS.get(value, value)
-    return f"{emoji_value}{CARD_EMOJIS[suit]}"
+    emoji_suit = CARD_EMOJIS.get(suit, suit)
+
+    return f"{emoji_value}{emoji_suit}"
 
 
 async def calculate_hand(hand: list) -> int:
@@ -88,17 +92,12 @@ async def render_hand(
 
     parts = []
 
-    if len(hand) >= 1:
-        parts.append(get_card_emoji(hand[0]))
+    for index, card in enumerate(hand):
 
-    if len(hand) >= 2:
-        parts.append(
-            "🂠" if hide_second
-            else get_card_emoji(hand[1])
-        )
-
-    for card in hand[2:]:
-        parts.append(get_card_emoji(card))
+        if index == 1 and hide_second:
+            parts.append("🂠")
+        else:
+            parts.append(get_card_emoji(card))
 
     return " ".join(parts)
 
@@ -177,14 +176,14 @@ async def process_bet(
 ):
 
     try:
-        bet = float(
+        bet = Decimal(
             message.text.replace(",", ".").strip()
         )
 
-        if bet <= 0:
-            raise ValueError
+        if not bet.is_finite() or bet <= 0:
+            raise InvalidOperation
 
-    except (ValueError, AttributeError):
+    except (InvalidOperation, ValueError, AttributeError):
         return await message.answer(
             "❌ Geçersiz bahis miktarı. Tekrar dene."
         )
@@ -207,7 +206,7 @@ async def process_bet(
                 reply_markup=games_menu()
             )
 
-        balance = user.balance or 0
+        balance = Decimal(str(user.balance or 0))
 
         if balance < bet:
             await state.clear()
@@ -233,7 +232,7 @@ async def process_bet(
     ]
 
     await state.update_data(
-        bet=bet,
+        bet=str(bet),
         player_hand=player_hand,
         dealer_hand=dealer_hand,
         deck=deck,
@@ -293,6 +292,12 @@ async def player_action(
     if owner_id != callback.from_user.id:
         return await callback.answer(
             "Bu oyun başka bir oyuncuya ait!",
+            show_alert=True
+        )
+
+    if not callback.message:
+        return await callback.answer(
+            "Oyun mesajına ulaşılamadı.",
             show_alert=True
         )
 
@@ -390,33 +395,39 @@ async def end_game(
 
     player_hand = data["player_hand"]
     dealer_hand = data["dealer_hand"]
-    bet = data["bet"]
+    bet = Decimal(str(data["bet"]))
     owner_id = data["owner_id"]
 
     player_total = await calculate_hand(player_hand)
     dealer_total = await calculate_hand(dealer_hand)
 
     if instant_blackjack:
+
         result = "🎉 BLACKJACK! x2,5 ödeme!"
-        payout = bet * 2.5
+        payout = bet * Decimal("2.5")
 
     elif busted:
+
         result = "💥 21'i aştın! Bahsi kaybettin."
-        payout = 0
+        payout = Decimal("0")
 
     elif dealer_total > 21:
+
         result = "🎉 Dağıtıcı 21'i aştı! Kazandın."
         payout = bet * 2
 
     elif player_total > dealer_total:
+
         result = "🎉 Kazandın!"
         payout = bet * 2
 
     elif player_total < dealer_total:
+
         result = "💼 Dağıtıcı kazandı."
-        payout = 0
+        payout = Decimal("0")
 
     else:
+
         result = "🤝 Berabere! Bahsin iade edildi."
         payout = bet
 
@@ -444,378 +455,37 @@ async def end_game(
 
             return
 
-        user.balance = (user.balance or 0) + payout
+        current_balance = Decimal(
+            str(user.balance or 0)
+        )
+
+        user.balance = current_balance + payout
         final_balance = user.balance
 
         await session.commit()
 
-    target_message = None
-
-    if isinstance(event, CallbackQuery):
-
-        target_message = event.message
-
-        if not instant_blackjack:
-
-            for i in range(len(dealer_hand)):
-
-                revealed = dealer_hand[:i + 1]
-
-                try:
-                    await target_message.edit_text(
-                        f"💼 **Dağıtıcının kartları:**\n"
-                        f"{await render_hand(revealed)}\n"
-                        f"➖ Toplam: "
-                        f"{await calculate_hand(revealed)}\n\n"
-                        f"🃏 **Senin kartların:**\n"
-                        f"{await render_hand(player_hand)}\n"
-                        f"➖ Toplam: {player_total}",
-                        parse_mode="Markdown"
-                    )
-
-                    await asyncio.sleep(0.8)
-
-                except Exception:
-                    pass
-
     await state.clear()
 
-    chat_id = (
-        event.chat.id
-        if isinstance(event, Message)
-        else event.message.chat.id
-    )
-
-    chat_type = (
-        event.chat.type
-        if isinstance(event, Message)
-        else event.message.chat.type
-    )
-
-    await check_bankruptcy(
-        bot=event.bot,
-        telegram_id=owner_id,
-        chat_id=chat_id,
-        chat_type=chat_type,
-        first_name=event.from_user.first_name or "Oyuncu"
-    )
-
-    final_text = (
-        f"{result}\n\n"
-        f"💼 **Dağıtıcının kartları:**\n"
-        f"{await render_hand(dealer_hand)}\n"
-        f"➖ Toplam: {dealer_total}\n\n"
-        f"🃏 **Senin kartların:**\n"
-        f"{await render_hand(player_hand)}\n"
-        f"➖ Toplam: {player_total}\n\n"
-        f"🪙 Ödeme: {payout:,.2f} Sanal Kredi\n"
-        f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi"
-    )
-
-    if target_message is not None:
-
-        try:
-            await target_message.edit_text(
-                final_text,
-                reply_markup=restart_keyboard(owner_id),
-                parse_mode="Markdown"
-            )
-
-        except Exception:
-            await target_message.answer(
-                final_text,
-                reply_markup=restart_keyboard(owner_id),
-                parse_mode="Markdown"
-            )
-
-    else:
-
-        await event.answer(
-            final_text,
-            reply_markup=restart_keyboard(owner_id),
-            parse_mode="Markdown"
-        )
-
-
-@router.callback_query(F.data.startswith("bj_restart:"))
-async def restart_game(
-    callback: CallbackQuery,
-    state: FSMContext
-):
-
-    try:
-        owner_id = int(callback.data.split(":", 1)[1])
-
-    except (ValueError, IndexError):
-        return await callback.answer(
-            "Geçersiz işlem.",
-            show_alert=True
-        )
-
-    if owner_id != callback.from_user.id:
-        return await callback.answer(
-            "Bu oyun başka bir oyuncuya ait!",
-            show_alert=True
-        )
-
-    await callback.answer()
-    await state.clear()
-
-    await callback.message.answer(
-        "🃏 **Blackjack**\n\n"
-        "🪙 Yeni bahis miktarını gir:",
-        reply_markup=bet_kb(),
-        parse_mode="Markdown"
-    )
-
-    await state.set_state(BlackjackStates.BET)
-
-
-            for i in range(len(dealer_hand)):
-
-                revealed = dealer_hand[:i + 1]
-
-                try:
-                    await target_message.edit_text(
-                        f"💼 **Dağıtıcının kartları:**\n"
-                        f"{await render_hand(revealed)}\n"
-                        f"➖ Toplam: "
-                        f"{await calculate_hand(revealed)}\n\n"
-                        f"🃏 **Senin kartların:**\n"
-                        f"{await render_hand(player_hand)}\n"
-                        f"➖ Toplam: {player_total}",
-                        parse_mode="Markdown"
-                    )
-
-                    await asyncio.sleep(0.8)
-
-                except Exception:
-                    pass
-
-    await state.clear()
-
-    chat_id = (
-        event.chat.id
-        if isinstance(event, Message)
-        else event.message.chat.id
-    )
-
-    chat_type = (
-        event.chat.type
-        if isinstance(event, Message)
-        else event.message.chat.type
-    )
-
-    await check_bankruptcy(
-        bot=event.bot,
-        telegram_id=owner_id,
-        chat_id=chat_id,
-        chat_type=chat_type,
-        first_name=event.from_user.first_name or "Oyuncu"
-    )
-
-    final_text = (
-        f"{result}\n\n"
-        f"💼 **Dağıtıcının kartları:**\n"
-        f"{await render_hand(dealer_hand)}\n"
-        f"➖ Toplam: {dealer_total}\n\n"
-        f"🃏 **Senin kartların:**\n"
-        f"{await render_hand(player_hand)}\n"
-        f"➖ Toplam: {player_total}\n\n"
-        f"🪙 Ödeme: {payout:,.2f} Sanal Kredi\n"
-        f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi"
-    )
-
-    if target_message is not None:
-
-        try:
-            await target_message.edit_text(
-                final_text,
-                reply_markup=restart_keyboard(owner_id),
-                parse_mode="Markdown"
-            )
-
-        except Exception:
-            await target_message.answer(
-                final_text,
-                reply_markup=restart_keyboard(owner_id),
-                parse_mode="Markdown"
-            )
-
-    else:
-
-        await event.answer(
-            final_text,
-            reply_markup=restart_keyboard(owner_id),
-            parse_mode="Markdown"
-        )
-
-
-@router.callback_query(F.data.startswith("bj_restart:"))
-async def restart_game(
-    callback: CallbackQuery,
-    state: FSMContext
-):
-
-    try:
-        owner_id = int(callback.data.split(":", 1)[1])
-    except (ValueError, IndexError):
-        return await callback.answer(
-            "Geçersiz işlem.",
-            show_alert=True
-        )
-
-    if owner_id != callback.from_user.id:
-        return await callback.answer(
-            "Bu oyun başka bir oyuncuya ait!",
-            show_alert=True
-        )
-
-    await callback.answer()
-
-    await state.clear()
-
-    await callback.message.answer(
-        "🃏 **Blackjack**\n\n"
-        "🪙 Yeni bahis miktarını gir:",
-        reply_markup=bet_kb(),
-        parse_mode="Markdown"
-    )
-
-    await state.set_state(BlackjackStates.BET)
-
-
-            for i in range(len(dealer_hand)):
-
-                revealed = dealer_hand[:i + 1]
-
-                try:
-                    await target_message.edit_text(
-                        f"💼 **Dağıtıcının kartları:**\n"
-                        f"{await render_hand(revealed)}\n"
-                        f"➖ Toplam: "
-                        f"{await calculate_hand(revealed)}\n\n"
-                        f"🃏 **Senin kartların:**\n"
-                        f"{await render_hand(player_hand)}\n"
-                        f"➖ Toplam: {player_total}",
-                        parse_mode="Markdown"
-                    )
-
-                    await asyncio.sleep(0.8)
-
-                except Exception:
-                    pass
-
-    await state.clear()
-
-    chat_id = (
-        event.chat.id
-        if isinstance(event, Message)
-        else event.message.chat.id
-    )
-
-    chat_type = (
-        event.chat.type
-        if isinstance(event, Message)
-        else event.message.chat.type
-    )
-
-    await check_bankruptcy(
-        bot=event.bot,
-        telegram_id=owner_id,
-        chat_id=chat_id,
-        chat_type=chat_type,
-        first_name=event.from_user.first_name or "Oyuncu"
-    )
-
-    final_text = (
-        f"{result}\n\n"
-        f"💼 **Dağıtıcının kartları:**\n"
-        f"{await render_hand(dealer_hand)}\n"
-        f"➖ Toplam: {dealer_total}\n\n"
-        f"🃏 **Senin kartların:**\n"
-        f"{await render_hand(player_hand)}\n"
-        f"➖ Toplam: {player_total}\n\n"
-        f"🪙 Ödeme: {payout:,.2f} Sanal Kredi\n"
-        f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi"
-    )
-
-    if target_message is not None:
-
-        try:
-            await target_message.edit_text(
-                final_text,
-                reply_markup=restart_keyboard(owner_id),
-                parse_mode="Markdown"
-            )
-
-        except Exception:
-            await target_message.answer(
-                final_text,
-                reply_markup=restart_keyboard(owner_id),
-                parse_mode="Markdown"
-            )
-
-    else:
-
-        await event.answer(
-            final_text,
-            reply_markup=restart_keyboard(owner_id),
-            parse_mode="Markdown"
-        )
-
-
-@router.callback_query(F.data.startswith("bj_restart:"))
-async def restart_game(
-    callback: CallbackQuery,
-    state: FSMContext
-):
-
-    try:
-        owner_id = int(callback.data.split(":", 1)[1])
-    except (ValueError, IndexError):
-        return await callback.answer(
-            "Geçersiz işlem.",
-            show_alert=True
-        )
-
-    if owner_id != callback.from_user.id:
-        return await callback.answer(
-            "Bu oyun başka bir oyuncuya ait!",
-            show_alert=True
-        )
-
-    await callback.answer()
-
-    await state.clear()
-
-    await callback.message.answer(
-        "🃏 **Blackjack**\n\n"
-        "🪙 Yeni bahis miktarını gir:",
-        reply_markup=bet_kb(),
-        parse_mode="Markdown"
-    )
-
-    await state.set_state(BlackjackStates.BET)
-            await asyncio.sleep(0.8)
-
-                except Exception:
-                    pass
-
-    else:
+    if isinstance(event, Message):
+        chat_id = event.chat.id
+        chat_type = event.chat.type
+        bot = event.bot
+        first_name = event.from_user.first_name or "Oyuncu"
         target_message = None
 
-    await state.clear()
+    else:
+        chat_id = event.message.chat.id
+        chat_type = event.message.chat.type
+        bot = event.bot
+        first_name = event.from_user.first_name or "Oyuncu"
+        target_message = event.message
 
-    # İflas kontrolü ve gerekiyorsa grup duyurusu.
     await check_bankruptcy(
-        bot=event.bot,
-        telegram_id=event.from_user.id,
-        chat_id=event.chat.id if isinstance(event, Message)
-        else event.message.chat.id,
-        chat_type=event.chat.type if isinstance(event, Message)
-        else event.message.chat.type,
-        first_name=event.from_user.first_name
+        bot=bot,
+        telegram_id=owner_id,
+        chat_id=chat_id,
+        chat_type=chat_type,
+        first_name=first_name
     )
 
     final_text = (
@@ -830,44 +500,60 @@ async def restart_game(
         f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi"
     )
 
+    keyboard = restart_keyboard(owner_id)
+
     if target_message is not None:
 
         try:
             await target_message.edit_text(
                 final_text,
-                reply_markup=restart_keyboard(),
+                reply_markup=keyboard,
                 parse_mode="Markdown"
             )
 
         except Exception:
             await target_message.answer(
                 final_text,
-                reply_markup=restart_keyboard(),
+                reply_markup=keyboard,
                 parse_mode="Markdown"
             )
 
     else:
+
         await event.answer(
             final_text,
-            reply_markup=restart_keyboard(),
+            reply_markup=keyboard,
             parse_mode="Markdown"
         )
 
 
-@router.callback_query(F.data == "bj_restart")
+@router.callback_query(
+    F.data.startswith("bj_restart:")
+)
 async def restart_game(
     callback: CallbackQuery,
     state: FSMContext
 ):
 
-    await callback.answer()
-
-    await state.clear()
-
     try:
-        await callback.message.delete()
-    except Exception:
-        pass
+        owner_id = int(
+            callback.data.split(":", 1)[1]
+        )
+
+    except (ValueError, IndexError):
+        return await callback.answer(
+            "Geçersiz işlem.",
+            show_alert=True
+        )
+
+    if owner_id != callback.from_user.id:
+        return await callback.answer(
+            "Bu oyun başka bir oyuncuya ait!",
+            show_alert=True
+        )
+
+    await callback.answer()
+    await state.clear()
 
     await callback.message.answer(
         "🃏 **Blackjack**\n\n"
@@ -876,4 +562,7 @@ async def restart_game(
         parse_mode="Markdown"
     )
 
-    await state.set_state(BlackjackStates.BET)
+    await state.set_state(
+        BlackjackStates.BET
+        )
+                
