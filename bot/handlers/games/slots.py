@@ -192,5 +192,5 @@ async def process_slots(message: Message, state: FSMContext):
         f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
-    )
+)
     
