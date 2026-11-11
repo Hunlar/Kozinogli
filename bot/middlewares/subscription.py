@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 # Zorunlu üyelik sohbetleri
 REQUIRED_CHATS = [
-    "@emeklisanalci",  # Kanal
-    -1004326389896     # Grup
+    "@emeklisanalci",
+    -1004326389896
 ]
 
 GROUP_INVITE_LINK = "https://t.me/+_XbbelgBCFJkZjk0"
@@ -75,15 +75,34 @@ class SubscriptionMiddleware(BaseMiddleware):
 
     async def __call__(self, handler, event, data):
 
+        user = getattr(event, "from_user", None)
+
+        if user is None:
+            return await handler(event, data)
+
+        # Sohbet türünü belirle
+        chat_type = None
+
+        if isinstance(event, Message):
+            chat_type = event.chat.type
+
+        elif isinstance(event, CallbackQuery):
+            if event.message:
+                chat_type = event.message.chat.type
+
+        # Grup ve süper gruplarda üyelik kontrolünü tamamen atla
+        if chat_type in ("group", "supergroup"):
+            return await handler(event, data)
+
+        # Yalnızca özel sohbetlerde üyelik kontrolü yap
+        if chat_type != "private":
+            return await handler(event, data)
+
+        # Üyelik kontrol butonunun kendi handler'ı çalışabilsin
         if (
             isinstance(event, CallbackQuery)
             and event.data == "check_subscription"
         ):
-            return await handler(event, data)
-
-        user = getattr(event, "from_user", None)
-
-        if user is None:
             return await handler(event, data)
 
         bot = data["bot"]
@@ -124,6 +143,14 @@ class SubscriptionMiddleware(BaseMiddleware):
 )
 async def verify_subscription(callback: CallbackQuery):
 
+    # Üyelik kontrolü yalnızca özel sohbetlerde yapılır
+    if (
+        callback.message is None
+        or callback.message.chat.type != "private"
+    ):
+        await callback.answer()
+        return
+
     is_member = await check_membership(
         callback.bot,
         callback.from_user.id
@@ -135,14 +162,14 @@ async def verify_subscription(callback: CallbackQuery):
             show_alert=True
         )
 
-        if callback.message:
-            await callback.message.edit_text(
-                "✅ Kanal ve grup üyeliğin doğrulandı!\n\n"
-                "ÖzVeGas'ı kullanmak için /start komutunu gönder."
-            )
+        await callback.message.edit_text(
+            "✅ Kanal ve grup üyeliğin doğrulandı!\n\n"
+            "ÖzVeGas'ı kullanmak için /start komutunu gönder."
+        )
 
     else:
         await callback.answer(
             "❌ Henüz kanal veya grup üyeliğin tamamlanmamış.",
             show_alert=True
-        )
+            )
+        
