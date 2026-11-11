@@ -1,17 +1,23 @@
 
-from aiogram import Router, F
-from aiogram.types import Message
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.types import Message, ReplyKeyboardRemove
 
-from bot.keyboards import games_menu
 
 router = Router()
 
 
-@router.message(F.text == "🎮 Oyunlar")
+@router.message(Command("games"))
 async def show_games_menu(message: Message):
+
     await message.answer(
-        "🎮 **Oyunlar menüsü**\n\n"
-        "Oynamak istediğin oyunu seç:",
-        reply_markup=games_menu(),
+        "🎮 **ÖzVeGas Oyunları**\n\n"
+        "🎰 Slot: /slots\n"
+        "🎡 Rulet: /roulette\n"
+        "🃏 Blackjack: /blackjack\n"
+        "💣 Mayınlar: /mines\n"
+        "🚀 Roket: /rocket\n"
+        "⚖️ Tek / Çift: /evenodd",
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
