@@ -33,6 +33,13 @@ def reset_bankruptcy_if_recovered(user: User):
         user.bankruptcy_chat_id = None
 
 
+def update_bankruptcy_status(user: User):
+    if (user.balance or 0) < BANKRUPTCY_LIMIT:
+        user.is_bankrupt = True
+    else:
+        reset_bankruptcy_if_recovered(user)
+
+
 async def get_bank_owner(session):
     result = await session.execute(
         select(User)
@@ -146,6 +153,163 @@ async def give_loan(message: Message, amount: float):
     )
 
 
+# --------------------------------------------------
+# DOĞRUDAN KREDİ TRANSFERİ
+# --------------------------------------------------
+
+@router.message(Command("borcver"))
+async def transfer_credit(
+    message: Message,
+    command: CommandObject
+):
+
+    if not message.reply_to_message:
+        await message.answer(
+            "❌ Kredi göndermek istediğin kullanıcının "
+            "mesajına yanıt vererek komutu kullan.\n\n"
+            "Örnek: /borcver 5000"
+        )
+        return
+
+    if not command.args:
+        await message.answer(
+            "❌ Göndermek istediğin miktarı belirt.\n"
+            "Örnek: /borcver 5000"
+        )
+        return
+
+    try:
+        amount = float(
+            command.args.replace(",", ".").strip()
+        )
+
+        if not math.isfinite(amount) or amount <= 0:
+            raise ValueError
+
+    except ValueError:
+        await message.answer(
+            "❌ Geçerli ve pozitif bir miktar gir."
+        )
+        return
+
+    sender_id = message.from_user.id
+    replied_user = message.reply_to_message.from_user
+
+    if replied_user is None:
+        await message.answer(
+            "❌ Hedef kullanıcı belirlenemedi."
+        )
+        return
+
+    receiver_id = replied_user.id
+
+    if sender_id == receiver_id:
+        await message.answer(
+            "❌ Kendine kredi gönderemezsin."
+        )
+        return
+
+    if sender_id == BANK_OWNER_TG_ID:
+        await message.answer(
+            "🏦 Kasa hesabından bu yöntemle kredi gönderemezsin."
+        )
+        return
+
+    if receiver_id == BANK_OWNER_TG_ID:
+        await message.answer(
+            "❌ Kasaya bu yöntemle kredi gönderemezsin."
+        )
+        return
+
+    async with AsyncSessionLocal() as session:
+
+        result = await session.execute(
+            select(User)
+            .where(
+                User.tg_id.in_([sender_id, receiver_id])
+            )
+            .order_by(User.id)
+            .with_for_update()
+        )
+
+        users = {
+            user.tg_id: user
+            for user in result.scalars().all()
+        }
+
+        sender = users.get(sender_id)
+        receiver = users.get(receiver_id)
+
+        if sender is None:
+            await message.answer(
+                "❌ Önce /start komutunu kullanmalısın."
+            )
+            return
+
+        if receiver is None:
+            await message.answer(
+                "❌ Alıcının ÖzVeGas hesabı bulunamadı."
+            )
+            return
+
+        if sender.is_blocked:
+            await message.answer(
+                "🚫 Hesabın engelli olduğu için transfer yapamazsın."
+            )
+            return
+
+        if receiver.is_blocked:
+            await message.answer(
+                "❌ Bu kullanıcıya kredi gönderilemiyor."
+            )
+            return
+
+        sender_balance = sender.balance or 0
+
+        if sender_balance < amount:
+            await message.answer(
+                "❌ Yetersiz bakiye.\n\n"
+                f"💰 Bakiyen: {sender_balance:,.2f}\n"
+                f"🪙 Göndermek istediğin: {amount:,.2f}"
+            )
+            return
+
+        sender.balance = sender_balance - amount
+        receiver.balance = (receiver.balance or 0) + amount
+
+        update_bankruptcy_status(sender)
+        reset_bankruptcy_if_recovered(receiver)
+
+        await session.commit()
+
+        new_sender_balance = sender.balance
+        new_receiver_balance = receiver.balance
+
+    await message.answer(
+        "✅ **Kredi transferi başarılı!**\n\n"
+        f"👤 Alıcı: {replied_user.full_name}\n"
+        f"🪙 Gönderilen: {amount:,.2f} Sanal Kredi\n"
+        f"💰 Yeni bakiyen: {new_sender_balance:,.2f} Sanal Kredi",
+        parse_mode="Markdown"
+    )
+
+    try:
+        await message.bot.send_message(
+            receiver_id,
+            "🎁 **Kredi aldın!**\n\n"
+            f"👤 Gönderen: {message.from_user.full_name}\n"
+            f"🪙 Gelen kredi: +{amount:,.2f} Sanal Kredi\n"
+            f"💰 Yeni bakiyen: {new_receiver_balance:,.2f} Sanal Kredi",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        pass
+
+
+# --------------------------------------------------
+# KASADAN BORÇ ALMA
+# --------------------------------------------------
+
 @router.message(Command("borc"))
 async def borrow_command(
     message: Message,
@@ -180,9 +344,14 @@ async def borrow_command(
 
 
 @router.message(Command("iptal"), DebtStates.waiting_for_amount)
-async def cancel_loan(message: Message, state: FSMContext):
+async def cancel_loan(
+    message: Message,
+    state: FSMContext
+):
     await state.clear()
-    await message.answer("❌ Borç alma işlemi iptal edildi.")
+    await message.answer(
+        "❌ Borç alma işlemi iptal edildi."
+    )
 
 
 @router.message(DebtStates.waiting_for_amount)
@@ -204,6 +373,10 @@ async def receive_loan_amount(
     await state.clear()
     await give_loan(message, amount)
 
+
+# --------------------------------------------------
+# BORÇLARI LİSTELEME
+# --------------------------------------------------
 
 @router.message(Command("borclarim"))
 async def list_debts(message: Message):
@@ -255,6 +428,10 @@ async def list_debts(message: Message):
         parse_mode="Markdown"
     )
 
+
+# --------------------------------------------------
+# BORÇ ÖDEME
+# --------------------------------------------------
 
 @router.message(Command("borcodeme"))
 async def repay_debt(
@@ -350,3 +527,4 @@ async def repay_debt(
         f"🪙 Ödenen: {paid_amount:,.2f} Sanal Kredi\n"
         f"💰 Kalan bakiye: {new_balance:,.2f} Sanal Kredi"
     )
+    
