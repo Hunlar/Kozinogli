@@ -3,11 +3,13 @@ import random
 from decimal import Decimal, InvalidOperation
 
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardButton,
-    InlineKeyboardMarkup
+    InlineKeyboardMarkup,
+    ReplyKeyboardRemove
 )
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -17,7 +19,7 @@ from sqlalchemy import select
 from db.database import AsyncSessionLocal
 from db.models import User
 
-from bot.keyboards import games_menu, bet_kb
+from bot.keyboards import bet_kb
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -134,12 +136,12 @@ def restart_keyboard(owner_id: int):
     )
 
 
+@router.message(Command("blackjack"))
 @router.message(F.text == "🃏 Blackjack")
 async def start_blackjack(
     message: Message,
     state: FSMContext
 ):
-
     await state.clear()
 
     await message.answer(
@@ -160,12 +162,11 @@ async def cancel_bet(
     message: Message,
     state: FSMContext
 ):
-
     await state.clear()
 
     await message.answer(
         "❌ Blackjack iptal edildi.",
-        reply_markup=games_menu()
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -174,7 +175,6 @@ async def process_bet(
     message: Message,
     state: FSMContext
 ):
-
     try:
         bet = Decimal(
             message.text.replace(",", ".").strip()
@@ -189,7 +189,6 @@ async def process_bet(
         )
 
     async with AsyncSessionLocal() as session:
-
         result = await session.execute(
             select(User)
             .where(User.tg_id == message.from_user.id)
@@ -203,7 +202,7 @@ async def process_bet(
 
             return await message.answer(
                 "❌ Kullanıcı hesabın bulunamadı.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
         balance = Decimal(str(user.balance or 0))
@@ -213,7 +212,7 @@ async def process_bet(
 
             return await message.answer(
                 "❌ Yeterli Sanal Kredin yok.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
         user.balance = balance - bet
@@ -278,7 +277,6 @@ async def player_action(
     callback: CallbackQuery,
     state: FSMContext
 ):
-
     data = await state.get_data()
 
     if not data:
@@ -321,7 +319,6 @@ async def player_action(
     deck = data["deck"]
 
     if callback.data == f"bj_hit:{owner_id}":
-
         if not deck:
             return await callback.answer(
                 "Kart destesi tükendi.",
@@ -360,7 +357,6 @@ async def player_action(
         await callback.answer()
 
     else:
-
         dealer_total = await calculate_hand(dealer_hand)
 
         while dealer_total < 17 and deck:
@@ -386,7 +382,6 @@ async def end_game(
     busted: bool = False,
     instant_blackjack: bool = False
 ):
-
     data = await state.get_data()
 
     if not data:
@@ -402,37 +397,30 @@ async def end_game(
     dealer_total = await calculate_hand(dealer_hand)
 
     if instant_blackjack:
-
         result = "🎉 BLACKJACK! x2,5 ödeme!"
         payout = bet * Decimal("2.5")
 
     elif busted:
-
         result = "💥 21'i aştın! Bahsi kaybettin."
         payout = Decimal("0")
 
     elif dealer_total > 21:
-
         result = "🎉 Dağıtıcı 21'i aştı! Kazandın."
         payout = bet * 2
 
     elif player_total > dealer_total:
-
         result = "🎉 Kazandın!"
         payout = bet * 2
 
     elif player_total < dealer_total:
-
         result = "💼 Dağıtıcı kazandı."
         payout = Decimal("0")
 
     else:
-
         result = "🤝 Berabere! Bahsin iade edildi."
         payout = bet
 
     async with AsyncSessionLocal() as session:
-
         db_result = await session.execute(
             select(User)
             .where(User.tg_id == owner_id)
@@ -503,7 +491,6 @@ async def end_game(
     keyboard = restart_keyboard(owner_id)
 
     if target_message is not None:
-
         try:
             await target_message.edit_text(
                 final_text,
@@ -519,7 +506,6 @@ async def end_game(
             )
 
     else:
-
         await event.answer(
             final_text,
             reply_markup=keyboard,
@@ -534,7 +520,6 @@ async def restart_game(
     callback: CallbackQuery,
     state: FSMContext
 ):
-
     try:
         owner_id = int(
             callback.data.split(":", 1)[1]
@@ -564,5 +549,5 @@ async def restart_game(
 
     await state.set_state(
         BlackjackStates.BET
-        )
-                
+    )
+    
