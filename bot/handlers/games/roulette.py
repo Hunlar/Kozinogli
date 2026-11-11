@@ -1,9 +1,11 @@
 
 import asyncio
 import random
+import math
 
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.filters import Command
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
@@ -17,7 +19,6 @@ from bot.keyboards import (
     roulette_colors_kb,
     roulette_ranges_kb,
     roulette_numbers_kb,
-    games_menu,
     bet_kb
 )
 
@@ -43,12 +44,10 @@ COLOR_MAP = {
         1, 3, 5, 7, 9, 12, 14, 16, 18,
         19, 21, 23, 25, 27, 30, 32, 34, 36
     ],
-
     "⚫ Siyah": [
         2, 4, 6, 8, 10, 11, 13, 15, 17,
         20, 22, 24, 26, 28, 29, 31, 33, 35
     ],
-
     "🟢 Yeşil": [0]
 }
 
@@ -107,6 +106,7 @@ def get_color_name(number: int) -> str:
     return "Siyah"
 
 
+@router.message(Command("roulette"))
 @router.message(F.text == "🎰 Rulet")
 async def start_roulette(message: Message, state: FSMContext):
     await state.clear()
@@ -120,17 +120,21 @@ async def start_roulette(message: Message, state: FSMContext):
     await state.set_state(RouletteStates.CHOOSE_BET_TYPE)
 
 
-@router.message(
-    RouletteStates.CHOOSE_BET_TYPE,
-    F.text == "🔙 Geri"
-)
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
 
     await message.answer(
-        "Oyun iptal edildi.",
-        reply_markup=games_menu()
+        "❌ Rulet oyunu iptal edildi.",
+        reply_markup=ReplyKeyboardRemove()
     )
+
+
+@router.message(
+    RouletteStates.CHOOSE_BET_TYPE,
+    F.text == "🔙 Geri"
+)
+async def cancel_bet_type(message: Message, state: FSMContext):
+    await cancel(message, state)
 
 
 @router.message(RouletteStates.CHOOSE_BET_TYPE)
@@ -252,13 +256,8 @@ async def ask_bet(message: Message, state: FSMContext):
     RouletteStates.CONFIRM_BET,
     F.text == "🔙 Geri"
 )
-async def cancel_bet(message: Message, state: FSMContext):
-    await state.clear()
-
-    await message.answer(
-        "Oyun iptal edildi.",
-        reply_markup=games_menu()
-    )
+async def cancel_bet_amount(message: Message, state: FSMContext):
+    await cancel(message, state)
 
 
 @router.message(RouletteStates.CONFIRM_BET)
@@ -267,11 +266,11 @@ async def process_bet_amount(message: Message, state: FSMContext):
     try:
         bet = float(message.text.replace(",", ".").strip())
 
-        if bet <= 0:
+        if not math.isfinite(bet) or bet <= 0:
             raise ValueError
 
     except (ValueError, AttributeError):
-        await message.answer("❌ Geçersiz bahis miktarı.")
+        await message.answer("❌ Geçerli ve pozitif bir bahis miktarı gir.")
         return
 
     data = await state.get_data()
@@ -281,7 +280,7 @@ async def process_bet_amount(message: Message, state: FSMContext):
 
         return await message.answer(
             "❌ Bahis bilgileri bulunamadı. Oyunu yeniden başlat.",
-            reply_markup=games_menu()
+            reply_markup=ReplyKeyboardRemove()
         )
 
     async with AsyncSessionLocal() as session:
@@ -299,7 +298,7 @@ async def process_bet_amount(message: Message, state: FSMContext):
 
             return await message.answer(
                 "❌ Kullanıcı kaydın bulunamadı.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
         balance = user.balance or 0
@@ -309,15 +308,13 @@ async def process_bet_amount(message: Message, state: FSMContext):
 
             return await message.answer(
                 "❌ Bahsin için yeterli Sanal Kredin yok.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
-        # Bahis bakiyeden düşülür.
         user.balance = balance - bet
 
         await session.commit()
 
-    # Rulet sonucu belirlenir.
     roulette_result = random.choice(ROULETTE_NUMBERS)
 
     await spin_animation(message, roulette_result)
@@ -326,7 +323,6 @@ async def process_bet_amount(message: Message, state: FSMContext):
     multiplier = get_multiplier(data["bet_type"])
 
     if won:
-        # Bahis iadesi + kazanç.
         payout = bet * (multiplier + 1)
 
         result_text = (
@@ -358,7 +354,7 @@ async def process_bet_amount(message: Message, state: FSMContext):
 
             return await message.answer(
                 "❌ Kullanıcı hesabına ulaşılamadı.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
         user.balance = (user.balance or 0) + payout
@@ -369,7 +365,6 @@ async def process_bet_amount(message: Message, state: FSMContext):
 
     await state.clear()
 
-    # İflas kontrolü ve gerekiyorsa grup duyurusu.
     await check_bankruptcy(
         bot=message.bot,
         telegram_id=message.from_user.id,
@@ -386,7 +381,7 @@ async def process_bet_amount(message: Message, state: FSMContext):
         f"{result_text}\n\n"
         f"📊 Çarpan: x{multiplier}\n"
         f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi",
-        reply_markup=games_menu(),
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
 
