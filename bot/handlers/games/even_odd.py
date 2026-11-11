@@ -13,7 +13,6 @@ from sqlalchemy import select
 from db.database import AsyncSessionLocal
 from db.models import User
 
-from bot.keyboards import even_odd_kb, bet_kb
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -33,23 +32,31 @@ async def game_even_odd(
 ):
     await state.clear()
 
-    await message.answer(
-        "🎲 **Çift / Tek Oyunu**\n\n"
-        "💰 Oynamak istediğin bahis miktarını seç:",
-        reply_markup=bet_kb()
+    await state.update_data(
+        owner_id=message.from_user.id
     )
 
     await state.set_state(EvenOddStates.BET)
 
+    await message.answer(
+        "🎲 **Çift / Tek Oyunu**\n\n"
+        "💰 Bahis miktarını yaz:\n\n"
+        "İptal etmek için /iptal yaz.",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
+    )
 
-@router.message(
-    EvenOddStates.BET,
-    F.text == "🔙 Geri"
-)
+
+@router.message(EvenOddStates.BET, Command("iptal"))
 async def cancel_bet(
     message: Message,
     state: FSMContext
 ):
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
+
     await state.clear()
 
     await message.answer(
@@ -63,6 +70,11 @@ async def process_bet(
     message: Message,
     state: FSMContext
 ):
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
+
     try:
         bet = float(
             message.text.replace("Sanal Kredi", "")
@@ -75,15 +87,16 @@ async def process_bet(
 
     except (ValueError, TypeError, AttributeError):
         await message.answer(
-            "❌ Geçersiz bahis miktarı. Lütfen tekrar dene.",
-            reply_markup=bet_kb()
+            "❌ Geçersiz bahis miktarı. Lütfen tekrar dene."
         )
         return
+
+    player_id = data["owner_id"]
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User)
-            .where(User.tg_id == message.from_user.id)
+            .where(User.tg_id == player_id)
             .with_for_update()
         )
 
@@ -111,29 +124,26 @@ async def process_bet(
         user.balance -= bet
         await session.commit()
 
-    await state.update_data(
-        bet=bet,
-        owner_id=message.from_user.id
-    )
-
-    await message.answer(
-        f"🪙 Bahsin: {bet:,.2f} Sanal Kredi\n\n"
-        "🎯 Sence gelecek sayı çift mi, tek mi?",
-        reply_markup=even_odd_kb()
-    )
+    await state.update_data(bet=bet)
 
     await state.set_state(EvenOddStates.CHOICE)
 
+    await message.answer(
+        f"🪙 Bahsin: {bet:,.2f} Sanal Kredi\n\n"
+        "🎯 Sence gelecek sayı çift mi, tek mi?\n\n"
+        "Tahminini Çift veya Tek olarak yaz.\n"
+        "İptal etmek için /iptal yaz.",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
-@router.message(
-    EvenOddStates.CHOICE,
-    F.text == "🔙 Geri"
-)
+
+@router.message(EvenOddStates.CHOICE, Command("iptal"))
 async def cancel_choice(
     message: Message,
     state: FSMContext
 ):
     data = await state.get_data()
+
     bet = data.get("bet")
     owner_id = data.get("owner_id")
 
@@ -143,7 +153,7 @@ async def cancel_choice(
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User)
-            .where(User.tg_id == message.from_user.id)
+            .where(User.tg_id == owner_id)
             .with_for_update()
         )
 
@@ -168,7 +178,7 @@ async def cancel_choice(
 
 @router.message(
     EvenOddStates.CHOICE,
-    F.text.in_(["Çift", "Tek"])
+    F.text.in_(["Çift", "Tek", "çift", "tek"])
 )
 async def process_choice(
     message: Message,
@@ -203,7 +213,7 @@ async def process_choice(
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User)
-            .where(User.tg_id == message.from_user.id)
+            .where(User.tg_id == owner_id)
             .with_for_update()
         )
 
@@ -247,7 +257,7 @@ async def process_choice(
 
     await check_bankruptcy(
         bot=message.bot,
-        telegram_id=message.from_user.id,
+        telegram_id=owner_id,
         chat_id=message.chat.id,
         chat_type=message.chat.type,
         first_name=message.from_user.first_name or "Oyuncu"
