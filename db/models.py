@@ -31,6 +31,9 @@ class User(Base):
 
     daily_credit_date = Column(Date, nullable=True)
 
+    # Kullanıcı botu özelden başlattı mı?
+    has_started = Column(Boolean, default=False, nullable=False)
+
     # İflas sistemi
     is_bankrupt = Column(Boolean, default=False)
     bankruptcy_announced = Column(Boolean, default=False)
