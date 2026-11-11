@@ -491,22 +491,4 @@ async def cashout_handler(
     )
 
     await state.clear()
-redi\n"
-        f"🪙 Yeni bakiye: {balance:,.2f} Sanal Kredi"
-    )
-
-    await check_bankruptcy(
-        bot=callback.bot,
-        telegram_id=callback.from_user.id,
-        chat_id=callback.message.chat.id,
-        chat_type=callback.message.chat.type,
-        first_name=callback.from_user.first_name or "Oyuncu"
-    )
-
-    await callback.message.answer(
-        "🎮 Başka bir oyun seçebilirsin.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-    await state.clear()
-            
+    
