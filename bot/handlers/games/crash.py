@@ -1,5 +1,6 @@
 
 import asyncio
+import math
 import random
 
 from aiogram import Router, F
@@ -7,8 +8,10 @@ from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
-    InlineKeyboardButton
+    InlineKeyboardButton,
+    ReplyKeyboardRemove
 )
+from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
@@ -17,7 +20,7 @@ from sqlalchemy import select
 from db.database import AsyncSessionLocal
 from db.models import User
 
-from bot.keyboards import games_menu, bet_kb
+from bot.keyboards import bet_kb
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -100,7 +103,6 @@ async def rocket_animation(
             multiplier=current_multiplier
         )
 
-        # Otomatik hedefe ulaşıldı.
         if current_multiplier >= target_coeff:
 
             stop_event.set()
@@ -136,7 +138,7 @@ async def rocket_animation(
 
             await message.answer(
                 "🎮 Başka bir oyun seçebilirsin.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
             await state.clear()
@@ -169,7 +171,6 @@ async def rocket_animation(
             reply_markup=keyboard
         )
 
-        # Kullanıcı bu sırada kazancını almış olabilir.
         if stop_event.is_set():
             return
 
@@ -187,7 +188,7 @@ async def rocket_animation(
 
             await message.answer(
                 "🍀 Şansını tekrar dene!",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
             await state.clear()
@@ -196,6 +197,7 @@ async def rocket_animation(
         await asyncio.sleep(UPDATE_INTERVAL)
 
 
+@router.message(Command("rocket"))
 @router.message(F.text == "🚀 Roket")
 async def start_crash(
     message: Message,
@@ -224,7 +226,7 @@ async def cancel_bet(
 
     await message.answer(
         "❌ Roket oyunu iptal edildi.",
-        reply_markup=games_menu()
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -238,7 +240,7 @@ async def process_bet(
             message.text.replace(",", ".").strip()
         )
 
-        if bet <= 0:
+        if not math.isfinite(bet) or bet <= 0:
             raise ValueError
 
     except (ValueError, AttributeError):
@@ -258,14 +260,15 @@ async def process_bet(
         if user is None:
             await state.clear()
             return await message.answer(
-                "❌ Kullanıcı hesabı bulunamadı."
+                "❌ Kullanıcı hesabı bulunamadı.",
+                reply_markup=ReplyKeyboardRemove()
             )
 
         if user.balance < bet:
             await state.clear()
             return await message.answer(
                 "❌ Yetersiz Sanal Kredi.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
         user.balance -= bet
@@ -278,7 +281,8 @@ async def process_bet(
     await message.answer(
         "📈 Hedef katsayıyı gir.\n\n"
         "Örnek: 1.5 veya 2.0 veya 3.0\n\n"
-        "🔙 İptal edersen bahis iade edilir."
+        "🔙 İptal edersen bahis iade edilir.",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -303,7 +307,7 @@ async def cancel_coeff(
     await message.answer(
         "❌ Oyun iptal edildi.\n"
         "🪙 Bahsin hesabına iade edildi.",
-        reply_markup=games_menu()
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -317,7 +321,11 @@ async def process_coeff(
             message.text.replace(",", ".").strip()
         )
 
-        if target <= 1.0 or target > 100:
+        if (
+            not math.isfinite(target)
+            or target <= 1.0
+            or target > 100
+        ):
             raise ValueError
 
     except (ValueError, AttributeError):
@@ -337,7 +345,7 @@ async def process_coeff(
             "Katsayı 1.0'dan büyük ve 100'den küçük "
             "veya eşit olmalıdır.\n\n"
             "🪙 Bahsin iade edildi.",
-            reply_markup=games_menu()
+            reply_markup=ReplyKeyboardRemove()
         )
 
     await state.update_data(
@@ -387,7 +395,6 @@ async def cashout_handler(
             show_alert=True
         )
 
-    # Animasyonun devam etmesini engelle.
     stop_event.set()
 
     multiplier = data["multiplier"]
@@ -434,7 +441,8 @@ async def cashout_handler(
 
     await callback.message.answer(
         "🎮 Başka bir oyun seçebilirsin.",
-        reply_markup=games_menu()
+        reply_markup=ReplyKeyboardRemove()
     )
 
     await state.clear()
+            
