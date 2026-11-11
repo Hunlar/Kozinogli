@@ -425,3 +425,4 @@ def get_multiplier(bet_type: str) -> float:
         "color": 1,
         "range": 2
     }[bet_type]
+    
