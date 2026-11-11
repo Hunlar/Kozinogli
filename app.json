@@ -2,13 +2,18 @@
 {
   "name": "ozvegas",
   "description": "ÖzVeGas Telegram Sanal Kredi ve Eğlence Botu",
-  "repository": "https://github.com/USERNAME/REPOSITORY",
+  "repository": "https://github.com/Hunlar/Kozinogli",
   "keywords": [
     "telegram",
     "bot",
     "aiogram",
     "python",
     "ozvegas"
+  ],
+  "addons": [
+    {
+      "plan": "heroku-postgresql:essential-0"
+    }
   ],
   "env": {
     "BOT_TOKEN": {
@@ -25,11 +30,6 @@
     },
     "TECH_SUPPORT_USER_ID": {
       "description": "Teknik destek hesabının Telegram ID'si",
-      "required": true
-    },
-    "BANK_OWNER_TG_ID": {
-      "description": "ÖzVeGas kasa sahibinin Telegram ID'si",
-      "value": "8658946296",
       "required": true
     },
     "BANKRUPTCY_VIDEO_FILE_ID": {
