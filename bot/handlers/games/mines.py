@@ -1,13 +1,16 @@
 
 import random
 import asyncio
+import math
 
 from aiogram import Router, F
+from aiogram.filters import Command
 from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
-    InlineKeyboardButton
+    InlineKeyboardButton,
+    ReplyKeyboardRemove
 )
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -17,7 +20,7 @@ from sqlalchemy import select
 from db.database import AsyncSessionLocal
 from db.models import User
 
-from bot.keyboards import games_menu, mines_keyboard, bet_kb
+from bot.keyboards import mines_keyboard, bet_kb
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -60,6 +63,7 @@ async def generate_grid(mines: int):
     return grid, opened
 
 
+@router.message(Command("mines"))
 @router.message(F.text == "💣 Mayınlar")
 async def start_mines(message: Message, state: FSMContext):
     await state.clear()
@@ -82,8 +86,8 @@ async def cancel_bet(message: Message, state: FSMContext):
     await state.clear()
 
     await message.answer(
-        "Oyun iptal edildi.",
-        reply_markup=games_menu()
+        "❌ Mayınlar oyunu iptal edildi.",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -91,15 +95,13 @@ async def cancel_bet(message: Message, state: FSMContext):
 async def process_bet(message: Message, state: FSMContext):
 
     try:
-        bet = float(
-            message.text.replace(",", ".").strip()
-        )
+        bet = float(message.text.replace(",", ".").strip())
 
-        if bet <= 0:
+        if not math.isfinite(bet) or bet <= 0:
             raise ValueError
 
     except (ValueError, AttributeError):
-        await message.answer("❌ Geçersiz bahis miktarı.")
+        await message.answer("❌ Geçerli ve pozitif bir bahis miktarı gir.")
         return
 
     async with AsyncSessionLocal() as session:
@@ -117,7 +119,7 @@ async def process_bet(message: Message, state: FSMContext):
 
             return await message.answer(
                 "❌ Kullanıcı hesabın bulunamadı.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
         balance = user.balance or 0
@@ -127,7 +129,7 @@ async def process_bet(message: Message, state: FSMContext):
 
             return await message.answer(
                 "❌ Yeterli Sanal Kredin yok.",
-                reply_markup=games_menu()
+                reply_markup=ReplyKeyboardRemove()
             )
 
         # Bahis mevcut sistemdeki gibi hemen düşülür.
@@ -158,7 +160,6 @@ async def process_bet(message: Message, state: FSMContext):
 async def cancel_mines(message: Message, state: FSMContext):
     data = await state.get_data()
 
-    # Mayın sayısı seçilmeden iptal edilirse bahis iade edilir.
     bet = data.get("bet", 0)
 
     async with AsyncSessionLocal() as session:
@@ -178,8 +179,8 @@ async def cancel_mines(message: Message, state: FSMContext):
     await state.clear()
 
     await message.answer(
-        "Oyun iptal edildi. Bahsin iade edildi.",
-        reply_markup=games_menu()
+        "❌ Oyun iptal edildi. Bahsin iade edildi.",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -329,7 +330,6 @@ async def cashout(
     grid = data["grid"]
     opened = data["opened"]
 
-    # Oyun bittiğinde bütün mayınlar gösterilir.
     for i in range(GRID_SIZE):
         for j in range(GRID_SIZE):
             opened[i][j] = True
@@ -355,7 +355,7 @@ async def cashout(
         "🏆 **Kazancı aldın!**\n\n"
         f"🪙 Ödeme: {won:,.2f} Sanal Kredi\n"
         f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi",
-        reply_markup=games_menu(),
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
 
@@ -462,7 +462,6 @@ async def process_cell(
         "Devam edebilir veya kazancını alabilirsin."
     )
 
-    # Bütün güvenli kareler açıldıysa otomatik ödeme.
     if safe == GRID_SIZE * GRID_SIZE - mines:
         await cashout(
             callback,
@@ -499,7 +498,6 @@ async def show_game_over(
 
         balance = user.balance if user else 0
 
-    # Tüm kareleri göster.
     for i in range(GRID_SIZE):
         for j in range(GRID_SIZE):
             opened[i][j] = True
@@ -513,7 +511,6 @@ async def show_game_over(
 
     await state.clear()
 
-    # Bahis zaten düşüldüğü için burada tekrar düşülmez.
     await check_bankruptcy(
         bot=callback.bot,
         telegram_id=callback.from_user.id,
@@ -526,6 +523,7 @@ async def show_game_over(
         "💥 **Mayına bastın!**\n\n"
         f"🪙 Kaybedilen bahis: {bet:,.2f} Sanal Kredi\n"
         f"💰 Güncel bakiye: {balance:,.2f} Sanal Kredi",
-        reply_markup=games_menu(),
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
+    
