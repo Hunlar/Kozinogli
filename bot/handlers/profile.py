@@ -8,22 +8,29 @@ from db.database import AsyncSessionLocal
 from db.models import User
 from bot.keyboards import profile_menu
 
+
 router = Router()
 
 
-@router.message(F.text == "Profil")
+@router.message(F.text == "👤 Profil")
 async def show_profile(message: Message):
+
     telegram_id = message.from_user.id
 
     async with AsyncSessionLocal() as session:
+
         result = await session.execute(
-            select(User).where(User.tg_id == telegram_id)
+            select(User).where(
+                User.tg_id == telegram_id
+            )
         )
+
         user = result.scalar_one_or_none()
 
         if user is None:
             await message.answer(
-                "Kullanıcı kaydınız bulunamadı. /start komutunu kullanın."
+                "❌ Kullanıcı kaydın bulunamadı.\n"
+                "/start komutunu kullanarak yeniden başlayabilirsin."
             )
             return
 
@@ -32,13 +39,20 @@ async def show_profile(message: Message):
         text = (
             "👤 **Kullanıcı Profili**\n\n"
             f"🆔 Telegram ID: `{telegram_id}`\n"
-            f"🪙 Bakiye: **{balance:g} Sanal Kredi**\n"
+            f"🪙 Bakiye: **{balance:,.2f} Sanal Kredi**\n"
         )
 
         if user.subscription_end:
             text += (
-                f"\n📅 Abonelik bitişi: "
+                "\n📅 Abonelik bitişi: "
                 f"{user.subscription_end.strftime('%d.%m.%Y')}"
+            )
+
+        if user.is_bankrupt:
+            text += (
+                "\n\n💸 **Hesap Durumu: İFLAS**\n"
+                "Yeni oyunlar için kasadan borç almalısın.\n"
+                "🏦 Borç işlemi: /borc"
             )
 
     await message.answer(
