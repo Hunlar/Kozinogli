@@ -13,7 +13,6 @@ from sqlalchemy import select
 
 from db.database import AsyncSessionLocal
 from db.models import User
-from bot.keyboards import bet_kb
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -58,18 +57,25 @@ async def spin_animation(message: Message, final_result: list):
 async def start_slots(message: Message, state: FSMContext):
     await state.clear()
 
+    await state.update_data(owner_id=message.from_user.id)
+    await state.set_state(SlotsStates.BET)
+
     await message.answer(
         "🎰 **Slot Makinesi**\n\n"
-        "🪙 Oynamak istediğin Sanal Kredi miktarını gir:",
-        reply_markup=bet_kb(),
+        "🪙 Oynamak istediğin Sanal Kredi miktarını yaz:\n\n"
+        "İptal etmek için /iptal yazabilirsin.",
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
 
-    await state.set_state(SlotsStates.BET)
 
-
-@router.message(SlotsStates.BET, F.text == "🔙 Geri")
+@router.message(SlotsStates.BET, Command("iptal"))
 async def cancel_bet(message: Message, state: FSMContext):
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
+
     await state.clear()
 
     await message.answer(
@@ -80,6 +86,12 @@ async def cancel_bet(message: Message, state: FSMContext):
 
 @router.message(SlotsStates.BET)
 async def process_slots(message: Message, state: FSMContext):
+
+    data = await state.get_data()
+
+    # Bahis yalnızca oyunu başlatan kişiden kabul edilir.
+    if data.get("owner_id") != message.from_user.id:
+        return
 
     try:
         bet = float(message.text.replace(",", ".").strip())
@@ -192,5 +204,4 @@ async def process_slots(message: Message, state: FSMContext):
         f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
-)
-    
+    )
