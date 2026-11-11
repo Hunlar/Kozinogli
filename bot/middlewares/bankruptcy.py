@@ -9,15 +9,22 @@ from db.models import User
 
 BANKRUPTCY_LIMIT = 4000
 
+
 # Bahis yatırıldıktan sonra tamamlanmasına izin verilen oyun durumları.
 ACTIVE_GAME_STATES = {
+    # Blackjack
     "BlackjackStates:PLAYER_TURN",
 
+    # Mayınlar
     "MinesStates:CHOOSE_MINES",
     "MinesStates:PLAYING",
 
+    # Roket
     "CrashStates:COEFF_INPUT",
     "CrashStates:FLYING",
+
+    # Çift / Tek
+    "EvenOddStates:CHOICE",
 }
 
 
@@ -30,7 +37,7 @@ class BankruptcyMiddleware(BaseMiddleware):
         if telegram_user is None:
             return await handler(event, data)
 
-        # Devam eden bir oyun varsa oyuncunun hamle yapmasına izin ver.
+        # Devam eden oyunun tamamlanmasına izin ver.
         fsm_state = data.get("state")
 
         if fsm_state is not None:
@@ -41,8 +48,7 @@ class BankruptcyMiddleware(BaseMiddleware):
                     return await handler(event, data)
 
             except Exception:
-                # FSM bilgisi alınamazsa güvenli şekilde bakiye
-                # kontrolüne devam et.
+                # FSM kontrolü başarısız olursa bakiye kontrolüne devam et.
                 pass
 
         async with AsyncSessionLocal() as session:
@@ -75,11 +81,9 @@ class BankruptcyMiddleware(BaseMiddleware):
             )
 
             if isinstance(event, Message):
-
                 await event.answer(warning)
 
             elif isinstance(event, CallbackQuery):
-
                 await event.answer(
                     "💸 İflas ettin! Yeni oyunlara "
                     "başlamak için borç almalısın.",
