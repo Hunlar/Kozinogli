@@ -14,14 +14,6 @@ from sqlalchemy import select
 from db.database import AsyncSessionLocal
 from db.models import User
 
-from bot.keyboards import (
-    roulette_bet_types_kb,
-    roulette_colors_kb,
-    roulette_ranges_kb,
-    roulette_numbers_kb,
-    bet_kb
-)
-
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -111,16 +103,27 @@ def get_color_name(number: int) -> str:
 async def start_roulette(message: Message, state: FSMContext):
     await state.clear()
 
+    await state.update_data(owner_id=message.from_user.id)
+    await state.set_state(RouletteStates.CHOOSE_BET_TYPE)
+
     await message.answer(
-        "🎰 **Rulet**\n\nBahis türünü seç:",
-        reply_markup=roulette_bet_types_kb(),
+        "🎰 **Rulet**\n\n"
+        "Bahis türünü mesaj olarak yaz:\n\n"
+        "🔢 Sayı\n"
+        "🎨 Renk\n"
+        "📊 Aralık\n\n"
+        "İptal etmek için /iptal yaz.",
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
 
-    await state.set_state(RouletteStates.CHOOSE_BET_TYPE)
-
 
 async def cancel(message: Message, state: FSMContext):
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
+
     await state.clear()
 
     await message.answer(
@@ -129,55 +132,64 @@ async def cancel(message: Message, state: FSMContext):
     )
 
 
-@router.message(
-    RouletteStates.CHOOSE_BET_TYPE,
-    F.text == "🔙 Geri"
-)
-async def cancel_bet_type(message: Message, state: FSMContext):
+@router.message(RouletteStates.CHOOSE_BET_TYPE, Command("iptal"))
+@router.message(RouletteStates.CHOOSE_NUMBER, Command("iptal"))
+@router.message(RouletteStates.CHOOSE_COLOR, Command("iptal"))
+@router.message(RouletteStates.CHOOSE_RANGE, Command("iptal"))
+@router.message(RouletteStates.CONFIRM_BET, Command("iptal"))
+async def cancel_roulette(message: Message, state: FSMContext):
     await cancel(message, state)
 
 
 @router.message(RouletteStates.CHOOSE_BET_TYPE)
 async def process_bet_type(message: Message, state: FSMContext):
+    data = await state.get_data()
 
-    if message.text == "🔢 Sayı":
-        await message.answer(
-            "🔢 Bahis yapmak istediğin sayıyı seç:",
-            reply_markup=roulette_numbers_kb()
-        )
+    if data.get("owner_id") != message.from_user.id:
+        return
 
+    choice = (message.text or "").strip()
+
+    if choice in ("🔢 Sayı", "Sayı"):
         await state.set_state(RouletteStates.CHOOSE_NUMBER)
 
-    elif message.text == "🎨 Renk":
         await message.answer(
-            "🎨 Bir renk seç:",
-            reply_markup=roulette_colors_kb()
+            "🔢 Bahis yapmak istediğin sayıyı yaz (0-36):"
         )
 
+    elif choice in ("🎨 Renk", "Renk"):
         await state.set_state(RouletteStates.CHOOSE_COLOR)
 
-    elif message.text == "📊 Aralık":
         await message.answer(
-            "📊 Bir sayı aralığı seç:",
-            reply_markup=roulette_ranges_kb()
+            "🎨 Bahis yapmak istediğin rengi yaz:\n\n"
+            "🔴 Kırmızı\n"
+            "⚫ Siyah\n"
+            "🟢 Yeşil"
         )
 
+    elif choice in ("📊 Aralık", "Aralık"):
         await state.set_state(RouletteStates.CHOOSE_RANGE)
 
+        await message.answer(
+            "📊 Bahis yapmak istediğin aralığı yaz:\n\n"
+            "1️⃣-1️⃣2️⃣\n"
+            "1️⃣3️⃣-2️⃣4️⃣\n"
+            "2️⃣5️⃣-3️⃣6️⃣"
+        )
+
     else:
-        await message.answer("❌ Lütfen menüden bir bahis türü seç.")
-
-
-@router.message(
-    RouletteStates.CHOOSE_NUMBER,
-    F.text == "🔙 Geri"
-)
-async def cancel_number(message: Message, state: FSMContext):
-    await cancel(message, state)
+        await message.answer(
+            "❌ Geçersiz bahis türü.\n"
+            "Sayı, Renk veya Aralık yaz."
+        )
 
 
 @router.message(RouletteStates.CHOOSE_NUMBER)
 async def process_number(message: Message, state: FSMContext):
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
 
     try:
         number = int(message.text.strip())
@@ -186,7 +198,7 @@ async def process_number(message: Message, state: FSMContext):
             raise ValueError
 
     except (ValueError, AttributeError):
-        await message.answer("❌ 0 ile 36 arasında bir sayı seç.")
+        await message.answer("❌ 0 ile 36 arasında bir sayı yaz.")
         return
 
     await state.update_data(
@@ -197,71 +209,75 @@ async def process_number(message: Message, state: FSMContext):
     await ask_bet(message, state)
 
 
-@router.message(
-    RouletteStates.CHOOSE_COLOR,
-    F.text == "🔙 Geri"
-)
-async def cancel_color(message: Message, state: FSMContext):
-    await cancel(message, state)
-
-
 @router.message(RouletteStates.CHOOSE_COLOR)
 async def process_color(message: Message, state: FSMContext):
+    data = await state.get_data()
 
-    if message.text not in COLOR_MAP:
-        await message.answer("❌ Geçersiz renk seçimi.")
+    if data.get("owner_id") != message.from_user.id:
+        return
+
+    choice = (message.text or "").strip()
+
+    if choice not in COLOR_MAP:
+        await message.answer(
+            "❌ Geçersiz renk.\n"
+            "🔴 Kırmızı, ⚫ Siyah veya 🟢 Yeşil yaz."
+        )
         return
 
     await state.update_data(
         bet_type="color",
-        bet_value=message.text
+        bet_value=choice
     )
 
     await ask_bet(message, state)
 
 
-@router.message(
-    RouletteStates.CHOOSE_RANGE,
-    F.text == "🔙 Geri"
-)
-async def cancel_range(message: Message, state: FSMContext):
-    await cancel(message, state)
-
-
 @router.message(RouletteStates.CHOOSE_RANGE)
 async def process_range(message: Message, state: FSMContext):
+    data = await state.get_data()
 
-    if message.text not in RANGE_MAP:
-        await message.answer("❌ Geçersiz sayı aralığı.")
+    if data.get("owner_id") != message.from_user.id:
+        return
+
+    choice = (message.text or "").strip()
+
+    if choice not in RANGE_MAP:
+        await message.answer(
+            "❌ Geçersiz aralık.\n"
+            "1️⃣-1️⃣2️⃣, 1️⃣3️⃣-2️⃣4️⃣ veya 2️⃣5️⃣-3️⃣6️⃣ yaz."
+        )
         return
 
     await state.update_data(
         bet_type="range",
-        bet_value=message.text
+        bet_value=choice
     )
 
     await ask_bet(message, state)
 
 
 async def ask_bet(message: Message, state: FSMContext):
-    await message.answer(
-        "🪙 Bahis miktarını gir:",
-        reply_markup=bet_kb()
-    )
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
 
     await state.set_state(RouletteStates.CONFIRM_BET)
 
-
-@router.message(
-    RouletteStates.CONFIRM_BET,
-    F.text == "🔙 Geri"
-)
-async def cancel_bet_amount(message: Message, state: FSMContext):
-    await cancel(message, state)
+    await message.answer(
+        "🪙 Bahis miktarını yaz:",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 
 @router.message(RouletteStates.CONFIRM_BET)
 async def process_bet_amount(message: Message, state: FSMContext):
+    data = await state.get_data()
+
+    # Bahis yalnızca oyunu başlatan kişiden kabul edilir.
+    if data.get("owner_id") != message.from_user.id:
+        return
 
     try:
         bet = float(message.text.replace(",", ".").strip())
@@ -270,10 +286,10 @@ async def process_bet_amount(message: Message, state: FSMContext):
             raise ValueError
 
     except (ValueError, AttributeError):
-        await message.answer("❌ Geçerli ve pozitif bir bahis miktarı gir.")
+        await message.answer(
+            "❌ Geçerli ve pozitif bir bahis miktarı gir."
+        )
         return
-
-    data = await state.get_data()
 
     if not all(key in data for key in ("bet_type", "bet_value")):
         await state.clear()
@@ -283,11 +299,12 @@ async def process_bet_amount(message: Message, state: FSMContext):
             reply_markup=ReplyKeyboardRemove()
         )
 
-    async with AsyncSessionLocal() as session:
+    player_id = data["owner_id"]
 
+    async with AsyncSessionLocal() as session:
         result_user = await session.execute(
             select(User)
-            .where(User.tg_id == message.from_user.id)
+            .where(User.tg_id == player_id)
             .with_for_update()
         )
 
@@ -340,10 +357,9 @@ async def process_bet_amount(message: Message, state: FSMContext):
         )
 
     async with AsyncSessionLocal() as session:
-
         result_user = await session.execute(
             select(User)
-            .where(User.tg_id == message.from_user.id)
+            .where(User.tg_id == player_id)
             .with_for_update()
         )
 
@@ -367,7 +383,7 @@ async def process_bet_amount(message: Message, state: FSMContext):
 
     await check_bankruptcy(
         bot=message.bot,
-        telegram_id=message.from_user.id,
+        telegram_id=player_id,
         chat_id=message.chat.id,
         chat_type=message.chat.type,
         first_name=message.from_user.first_name
