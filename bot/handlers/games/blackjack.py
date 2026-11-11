@@ -43,7 +43,6 @@ CARD_EMOJIS = {
 
 def get_card_emoji(card: tuple) -> str:
     value, suit = card[0][:-1], card[0][-1]
-
     emoji_value = CARD_EMOJIS.get(value, value)
 
     return f"{emoji_value}{CARD_EMOJIS[suit]}"
@@ -84,7 +83,11 @@ def create_deck():
     return deck
 
 
-async def render_hand(hand: list, hide_second: bool = False) -> str:
+async def render_hand(
+    hand: list,
+    hide_second: bool = False
+) -> str:
+
     parts = []
 
     if len(hand) >= 1:
@@ -102,32 +105,32 @@ async def render_hand(hand: list, hide_second: bool = False) -> str:
     return " ".join(parts)
 
 
-def blackjack_keyboard():
+def blackjack_keyboard(owner_id: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="✅ Kart Çek",
-                    callback_data="hit"
+                    callback_data=f"bj_hit:{owner_id}"
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="⛔ Dur",
-                    callback_data="stand"
+                    callback_data=f"bj_stand:{owner_id}"
                 )
             ]
         ]
     )
 
 
-def restart_keyboard():
+def restart_keyboard(owner_id: int):
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="🔄 Tekrar Oyna",
-                    callback_data="bj_restart"
+                    callback_data=f"bj_restart:{owner_id}"
                 )
             ]
         ]
@@ -135,7 +138,11 @@ def restart_keyboard():
 
 
 @router.message(F.text == "🃏 Blackjack")
-async def start_blackjack(message: Message, state: FSMContext):
+async def start_blackjack(
+    message: Message,
+    state: FSMContext
+):
+
     await state.clear()
 
     await message.answer(
@@ -152,17 +159,24 @@ async def start_blackjack(message: Message, state: FSMContext):
     BlackjackStates.BET,
     F.text == "🔙 Geri"
 )
-async def cancel_bet(message: Message, state: FSMContext):
+async def cancel_bet(
+    message: Message,
+    state: FSMContext
+):
+
     await state.clear()
 
     await message.answer(
-        "Oyun iptal edildi.",
+        "❌ Blackjack iptal edildi.",
         reply_markup=games_menu()
     )
 
 
 @router.message(BlackjackStates.BET)
-async def process_bet(message: Message, state: FSMContext):
+async def process_bet(
+    message: Message,
+    state: FSMContext
+):
 
     try:
         bet = float(
@@ -205,12 +219,10 @@ async def process_bet(message: Message, state: FSMContext):
                 reply_markup=games_menu()
             )
 
-        # Bahis bakiyeden düşülür.
         user.balance = balance - bet
 
         await session.commit()
 
-    # Kartlar dağıtılır.
     deck = create_deck()
 
     player_hand = [
@@ -227,18 +239,20 @@ async def process_bet(message: Message, state: FSMContext):
         bet=bet,
         player_hand=player_hand,
         dealer_hand=dealer_hand,
-        deck=deck
+        deck=deck,
+        owner_id=message.from_user.id
     )
 
     player_total = await calculate_hand(player_hand)
 
-    # İlk elde Blackjack kontrolü.
     if player_total == 21:
+
         await end_game(
             message,
             state,
             instant_blackjack=True
         )
+
         return
 
     msg = await message.answer(
@@ -247,7 +261,9 @@ async def process_bet(message: Message, state: FSMContext):
         f"➖ Toplam: {player_total}\n\n"
         f"💼 **Dağıtıcının kartları:**\n"
         f"{await render_hand(dealer_hand, hide_second=True)}",
-        reply_markup=blackjack_keyboard(),
+        reply_markup=blackjack_keyboard(
+            message.from_user.id
+        ),
         parse_mode="Markdown"
     )
 
@@ -262,7 +278,7 @@ async def process_bet(message: Message, state: FSMContext):
 
 @router.callback_query(
     BlackjackStates.PLAYER_TURN,
-    F.data.in_(["hit", "stand"])
+    F.data.startswith("bj_")
 )
 async def player_action(
     callback: CallbackQuery,
@@ -272,24 +288,45 @@ async def player_action(
     data = await state.get_data()
 
     if not data:
-        await callback.answer(
+        return await callback.answer(
             "Oyun oturumu bulunamadı.",
             show_alert=True
         )
-        return
+
+    owner_id = data.get("owner_id")
+
+    if owner_id != callback.from_user.id:
+        return await callback.answer(
+            "Bu oyun başka bir oyuncuya ait!",
+            show_alert=True
+        )
+
+    if callback.message.message_id != data.get("message_id"):
+        return await callback.answer(
+            "Bu oyun mesajı artık geçerli değil.",
+            show_alert=True
+        )
+
+    if callback.data not in (
+        f"bj_hit:{owner_id}",
+        f"bj_stand:{owner_id}"
+    ):
+        return await callback.answer(
+            "Geçersiz oyun işlemi.",
+            show_alert=True
+        )
 
     player_hand = data["player_hand"]
     dealer_hand = data["dealer_hand"]
     deck = data["deck"]
 
-    if callback.data == "hit":
+    if callback.data == f"bj_hit:{owner_id}":
 
         if not deck:
-            await callback.answer(
+            return await callback.answer(
                 "Kart destesi tükendi.",
                 show_alert=True
             )
-            return
 
         player_hand.append(deck.pop())
 
@@ -301,6 +338,7 @@ async def player_action(
         player_total = await calculate_hand(player_hand)
 
         if player_total > 21:
+
             await callback.answer()
 
             await end_game(
@@ -308,6 +346,7 @@ async def player_action(
                 state,
                 busted=True
             )
+
             return
 
         await callback.message.edit_text(
@@ -316,7 +355,7 @@ async def player_action(
             f"➖ Toplam: {player_total}\n\n"
             f"💼 **Dağıtıcının kartları:**\n"
             f"{await render_hand(dealer_hand, hide_second=True)}",
-            reply_markup=blackjack_keyboard(),
+            reply_markup=blackjack_keyboard(owner_id),
             parse_mode="Markdown"
         )
 
@@ -359,40 +398,46 @@ async def end_game(
     player_hand = data["player_hand"]
     dealer_hand = data["dealer_hand"]
     bet = data["bet"]
+    owner_id = data["owner_id"]
 
     player_total = await calculate_hand(player_hand)
     dealer_total = await calculate_hand(dealer_hand)
 
     if instant_blackjack:
+
         result = "🎉 BLACKJACK! x2,5 ödeme!"
         payout = bet * 2.5
 
     elif busted:
+
         result = "💥 21'i aştın! Bahsi kaybettin."
         payout = 0
 
     elif dealer_total > 21:
+
         result = "🎉 Dağıtıcı 21'i aştı! Kazandın."
         payout = bet * 2
 
     elif player_total > dealer_total:
+
         result = "🎉 Kazandın!"
         payout = bet * 2
 
     elif player_total < dealer_total:
+
         result = "💼 Dağıtıcı kazandı."
         payout = 0
 
     else:
+
         result = "🤝 Berabere! Bahsin iade edildi."
         payout = bet
 
-    # Kazanç veya iade bakiyeye eklenir.
     async with AsyncSessionLocal() as session:
 
         db_result = await session.execute(
             select(User)
-            .where(User.tg_id == event.from_user.id)
+            .where(User.tg_id == owner_id)
             .with_for_update()
         )
 
@@ -418,11 +463,12 @@ async def end_game(
 
         await session.commit()
 
-    # Oyun sonucunu göstereceğimiz mesaj.
+    target_message = None
+
     if isinstance(event, CallbackQuery):
+
         target_message = event.message
 
-        # Dağıtıcının kartlarını açma animasyonu.
         if not instant_blackjack:
 
             for i in range(len(dealer_hand)):
@@ -442,6 +488,102 @@ async def end_game(
                     )
 
                     await asyncio.sleep(0.8)
+
+                except Exception:
+                    pass
+
+    await state.clear()
+
+    chat_id = (
+        event.chat.id
+        if isinstance(event, Message)
+        else event.message.chat.id
+    )
+
+    chat_type = (
+        event.chat.type
+        if isinstance(event, Message)
+        else event.message.chat.type
+    )
+
+    await check_bankruptcy(
+        bot=event.bot,
+        telegram_id=owner_id,
+        chat_id=chat_id,
+        chat_type=chat_type,
+        first_name=event.from_user.first_name or "Oyuncu"
+    )
+
+    final_text = (
+        f"{result}\n\n"
+        f"💼 **Dağıtıcının kartları:**\n"
+        f"{await render_hand(dealer_hand)}\n"
+        f"➖ Toplam: {dealer_total}\n\n"
+        f"🃏 **Senin kartların:**\n"
+        f"{await render_hand(player_hand)}\n"
+        f"➖ Toplam: {player_total}\n\n"
+        f"🪙 Ödeme: {payout:,.2f} Sanal Kredi\n"
+        f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi"
+    )
+
+    if target_message is not None:
+
+        try:
+            await target_message.edit_text(
+                final_text,
+                reply_markup=restart_keyboard(owner_id),
+                parse_mode="Markdown"
+            )
+
+        except Exception:
+            await target_message.answer(
+                final_text,
+                reply_markup=restart_keyboard(owner_id),
+                parse_mode="Markdown"
+            )
+
+    else:
+
+        await event.answer(
+            final_text,
+            reply_markup=restart_keyboard(owner_id),
+            parse_mode="Markdown"
+        )
+
+
+@router.callback_query(F.data.startswith("bj_restart:"))
+async def restart_game(
+    callback: CallbackQuery,
+    state: FSMContext
+):
+
+    try:
+        owner_id = int(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return await callback.answer(
+            "Geçersiz işlem.",
+            show_alert=True
+        )
+
+    if owner_id != callback.from_user.id:
+        return await callback.answer(
+            "Bu oyun başka bir oyuncuya ait!",
+            show_alert=True
+        )
+
+    await callback.answer()
+
+    await state.clear()
+
+    await callback.message.answer(
+        "🃏 **Blackjack**\n\n"
+        "🪙 Yeni bahis miktarını gir:",
+        reply_markup=bet_kb(),
+        parse_mode="Markdown"
+    )
+
+    await state.set_state(BlackjackStates.BET)
+            await asyncio.sleep(0.8)
 
                 except Exception:
                     pass
