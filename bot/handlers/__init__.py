@@ -3,9 +3,12 @@ from bot.middlewares.bankruptcy import BankruptcyMiddleware
 
 
 def setup_handlers(dp):
+
     from bot.handlers.auth import router as auth_router
     from bot.handlers.common import router as common_router
     from bot.handlers.profile import router as profile_router
+
+    from bot.handlers.debt import router as debt_router
 
     from bot.handlers.games.games_menu import router as games_menu_router
     from bot.handlers.games.slots import router as slots_router
@@ -28,19 +31,32 @@ def setup_handlers(dp):
         even_odd_router
     ]
 
-    for router in game_routers:
-        router.message.outer_middleware(BankruptcyMiddleware())
-        router.callback_query.outer_middleware(BankruptcyMiddleware())
+    # İflas kontrolü yalnızca oyun router'larında çalışır.
+    for game_router in game_routers:
+        game_router.message.outer_middleware(
+            BankruptcyMiddleware()
+        )
 
+        game_router.callback_query.outer_middleware(
+            BankruptcyMiddleware()
+        )
+
+    # Temel router'lar
     dp.include_router(auth_router)
     dp.include_router(common_router)
     dp.include_router(profile_router)
 
+    # Borç sistemi: İflas etmiş kullanıcılar da erişebilir.
+    dp.include_router(debt_router)
+
+    # Oyun menüsü
     dp.include_router(games_menu_router)
 
-    for router in game_routers:
-        dp.include_router(router)
+    # Oyunlar
+    for game_router in game_routers:
+        dp.include_router(game_router)
 
+    # Diğer sistemler
     dp.include_router(bonuses_router)
     dp.include_router(support_router)
     dp.include_router(admin_router)
