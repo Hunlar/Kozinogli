@@ -1,11 +1,11 @@
 
-from aiogram import Router, F
-from aiogram.types import Message
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
 from settings import TECH_SUPPORT_USER_ID
-from bot.keyboards import back_button, main_menu
 
 
 router = Router()
@@ -15,7 +15,7 @@ class SupportStates(StatesGroup):
     AWAITING_DESCRIPTION = State()
 
 
-@router.message(F.text == "🛠 Destek")
+@router.message(Command("support"))
 async def start_support_request(
     message: Message,
     state: FSMContext
@@ -27,20 +27,17 @@ async def start_support_request(
         "📨 Yaşadığın sorunu ayrıntılı şekilde anlat.\n\n"
         "Metin, fotoğraf, video, belge veya sesli mesaj "
         "gönderebilirsin.\n\n"
-        "Ekibimiz talebini inceleyip en kısa sürede "
-        "seninle iletişime geçecektir.\n\n"
-        "❌ İşlemi iptal etmek için Geri butonuna bas.",
-        reply_markup=back_button()
+        "❌ İşlemi iptal etmek için /iptal yaz.",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="Markdown"
     )
 
-    await state.set_state(
-        SupportStates.AWAITING_DESCRIPTION
-    )
+    await state.set_state(SupportStates.AWAITING_DESCRIPTION)
 
 
 @router.message(
-    SupportStates.AWAITING_DESCRIPTION,
-    F.text == "🔙 Geri"
+    Command("iptal"),
+    SupportStates.AWAITING_DESCRIPTION
 )
 async def cancel_support_request(
     message: Message,
@@ -50,7 +47,7 @@ async def cancel_support_request(
 
     await message.answer(
         "❌ Destek talebi iptal edildi.",
-        reply_markup=main_menu(message.from_user.id)
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -64,7 +61,7 @@ async def forward_to_support(
         await message.answer(
             "❌ Destek sistemi şu anda yapılandırılmamış. "
             "Lütfen daha sonra tekrar dene.",
-            reply_markup=main_menu(message.from_user.id)
+            reply_markup=ReplyKeyboardRemove()
         )
         await state.clear()
         return
@@ -84,15 +81,12 @@ async def forward_to_support(
     )
 
     try:
-        # Önce destek ekibine kullanıcı bilgilerini gönder.
         await bot.send_message(
             chat_id=TECH_SUPPORT_USER_ID,
             text=user_info,
             parse_mode="Markdown"
         )
 
-        # Kullanıcının gönderdiği mesajı tüm medya
-        # türleriyle birlikte destek hesabına kopyala.
         await bot.copy_message(
             chat_id=TECH_SUPPORT_USER_ID,
             from_chat_id=message.chat.id,
@@ -102,8 +96,7 @@ async def forward_to_support(
     except Exception:
         await message.answer(
             "❌ Destek talebin gönderilemedi.\n"
-            "Lütfen daha sonra tekrar dene.",
-            reply_markup=back_button()
+            "Lütfen daha sonra tekrar dene."
         )
         return
 
@@ -113,5 +106,6 @@ async def forward_to_support(
         "✅ Destek talebin başarıyla gönderildi!\n\n"
         "Ekibimiz başvurunu inceleyecek ve seninle "
         "en kısa sürede iletişime geçecektir.",
-        reply_markup=main_menu(message.from_user.id)
+        reply_markup=ReplyKeyboardRemove()
     )
+    
