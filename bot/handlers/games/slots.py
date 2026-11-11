@@ -205,3 +205,4 @@ async def process_slots(message: Message, state: FSMContext):
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
+    
