@@ -31,7 +31,7 @@ def subscription_keyboard():
             [
                 InlineKeyboardButton(
                     text="👥 Grubumuza Katıl",
-                    url="https://t.me/ozturkordusu"
+                    url="https://t.me/+_XbbelgBCFJkZjk0"
                 )
             ],
             [
