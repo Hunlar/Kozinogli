@@ -1,7 +1,8 @@
 
 import math
 
-from aiogram import Router, F
+from aiogram import Router
+from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.types import Message
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -10,8 +11,6 @@ from sqlalchemy import select, update, func
 
 from db.database import AsyncSessionLocal
 from db.models import User, GameSettings
-
-from bot.keyboards import main_menu, admin_menu, back_button
 from settings import ADMINS
 
 
@@ -53,69 +52,62 @@ def valid_positive_number(value: str) -> float:
     return amount
 
 
-# --------------------------------------------------
-# ADMIN PANELİ
-# --------------------------------------------------
-
-@router.message(F.text.endswith("Admin Paneli"))
+@router.message(Command("admin"))
 async def show_admin_panel(message: Message):
-
     if not await check_admin(message):
         return
 
     await message.answer(
-        "🛠 **ÖzVeGas Yönetici Paneli**\n\n"
-        "Yapmak istediğin işlemi seç:",
-        reply_markup=admin_menu(),
+        "🛠 **ÖzVeGas Yönetici Komutları**\n\n"
+        "/broadcast — Duyuru gönder\n"
+        "/credit — Kullanıcıya kredi ekle\n"
+        "/ban — Kullanıcıyı engelle\n"
+        "/unban — Kullanıcının engelini kaldır\n"
+        "/stats — İstatistikleri görüntüle\n"
+        "/multiplier — Oyun çarpanını düzenle\n\n"
+        "İşlemleri iptal etmek için /iptal yaz.",
         parse_mode="Markdown"
     )
 
 
-@router.message(F.text.endswith("Admin Panelinden Çık"))
-async def exit_admin(
+@router.message(Command("iptal"), StateFilter(
+    AdminStates.BROADCAST_MESSAGE,
+    AdminStates.ADD_BALANCE_USER_ID,
+    AdminStates.ADD_BALANCE_AMOUNT,
+    AdminStates.BLOCK_USER,
+    AdminStates.UNBLOCK_USER,
+    AdminStates.GAME_MULTIPLIER_NAME,
+    AdminStates.GAME_MULTIPLIER_VALUE
+))
+async def cancel_admin_action(
     message: Message,
     state: FSMContext
 ):
-
-    if not await check_admin(message):
-        return
-
     await state.clear()
-
-    await message.answer(
-        "🏠 Ana menü:",
-        reply_markup=main_menu(
-            user_id=message.from_user.id
-        )
-    )
+    await message.answer("❌ Yönetici işlemi iptal edildi.")
 
 
 # --------------------------------------------------
-# DUYURU GÖNDERME
+# DUYURU
 # --------------------------------------------------
 
-@router.message(F.text.endswith("Duyuru Gönder"))
+@router.message(Command("broadcast"))
 async def start_broadcast(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         return
 
     await state.clear()
+    await state.set_state(AdminStates.BROADCAST_MESSAGE)
 
     await message.answer(
         "📢 **Duyuru Gönderme**\n\n"
-        "Göndermek istediğin duyuru metnini yaz.\n\n"
-        "HTML biçimlendirmesi kullanabilirsin.\n"
-        "İşlemi iptal etmek için Geri butonuna bas.",
-        reply_markup=back_button(),
+        "Göndermek istediğin duyuru metnini yaz.\n"
+        "HTML biçimlendirmesi kullanabilirsin.\n\n"
+        "İptal etmek için /iptal yaz.",
         parse_mode="Markdown"
-    )
-
-    await state.set_state(
-        AdminStates.BROADCAST_MESSAGE
     )
 
 
@@ -124,18 +116,8 @@ async def process_broadcast(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         await state.clear()
-        return
-
-    if message.text == "🔙 Geri":
-        await state.clear()
-
-        await message.answer(
-            "❌ Duyuru gönderme işlemi iptal edildi.",
-            reply_markup=admin_menu()
-        )
         return
 
     if not message.text:
@@ -145,9 +127,7 @@ async def process_broadcast(
         return
 
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(User.tg_id)
-        )
+        result = await session.execute(select(User.tg_id))
         user_ids = result.scalars().all()
 
     delivered = 0
@@ -162,7 +142,6 @@ async def process_broadcast(
                 disable_web_page_preview=True
             )
             delivered += 1
-
         except Exception:
             failed += 1
 
@@ -173,124 +152,28 @@ async def process_broadcast(
         f"✅ Ulaşan kullanıcı: {delivered}\n"
         f"❌ Ulaşmayan kullanıcı: {failed}\n"
         f"👥 Toplam kullanıcı: {len(user_ids)}",
-        reply_markup=admin_menu(),
         parse_mode="Markdown"
     )
 
 
 # --------------------------------------------------
-# KULLANICI ENGELİNİ KALDIRMA
+# KULLANICIYA KREDİ EKLEME
 # --------------------------------------------------
 
-@router.message(F.text.endswith("Engeli Kaldır"))
-async def unblock_user_start(
-    message: Message,
-    state: FSMContext
-):
-
-    if not await check_admin(message):
-        return
-
-    await state.clear()
-
-    await message.answer(
-        "🔓 Engelini kaldırmak istediğin kullanıcının "
-        "Telegram ID'sini gir:",
-        reply_markup=back_button()
-    )
-
-    await state.set_state(AdminStates.UNBLOCK_USER)
-
-
-@router.message(AdminStates.UNBLOCK_USER)
-async def process_unblock_user(
-    message: Message,
-    state: FSMContext
-):
-
-    if not await check_admin(message):
-        await state.clear()
-        return
-
-    if message.text == "🔙 Geri":
-        await state.clear()
-
-        await message.answer(
-            "❌ İşlem iptal edildi.",
-            reply_markup=admin_menu()
-        )
-        return
-
-    try:
-        target_id = int(message.text)
-
-        if target_id <= 0:
-            raise ValueError
-
-    except (ValueError, TypeError):
-        await message.answer(
-            "❌ Geçerli bir Telegram ID'si gir."
-        )
-        return
-
-    async with AsyncSessionLocal() as session:
-
-        result = await session.execute(
-            update(User)
-            .where(User.tg_id == target_id)
-            .values(is_blocked=False)
-        )
-
-        found = result.rowcount > 0
-
-        await session.commit()
-
-    await state.clear()
-
-    if not found:
-        await message.answer(
-            "❌ Kullanıcı bulunamadı.",
-            reply_markup=admin_menu()
-        )
-        return
-
-    try:
-        await message.bot.send_message(
-            target_id,
-            "✅ Hesabının engeli yönetici tarafından kaldırıldı."
-        )
-    except Exception:
-        pass
-
-    await message.answer(
-        f"✅ {target_id} ID'li kullanıcının engeli kaldırıldı.",
-        reply_markup=admin_menu()
-    )
-
-
-# --------------------------------------------------
-# SANAL KREDİ EKLEME
-# --------------------------------------------------
-
-@router.message(F.text.endswith("Sanal Kredi Ekle"))
+@router.message(Command("credit"))
 async def add_balance_start(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         return
 
     await state.clear()
+    await state.set_state(AdminStates.ADD_BALANCE_USER_ID)
 
     await message.answer(
-        "🪙 Sanal Kredi eklemek istediğin kullanıcının "
-        "Telegram ID'sini gir:",
-        reply_markup=back_button()
-    )
-
-    await state.set_state(
-        AdminStates.ADD_BALANCE_USER_ID
+        "🪙 Kredi eklenecek kullanıcının Telegram ID'sini gir.\n"
+        "İptal etmek için /iptal yaz."
     )
 
 
@@ -299,18 +182,8 @@ async def add_balance_user_id(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         await state.clear()
-        return
-
-    if message.text == "🔙 Geri":
-        await state.clear()
-
-        await message.answer(
-            "❌ İşlem iptal edildi.",
-            reply_markup=admin_menu()
-        )
         return
 
     try:
@@ -318,24 +191,14 @@ async def add_balance_user_id(
 
         if user_id <= 0:
             raise ValueError
-
-    except (ValueError, TypeError):
-        await message.answer(
-            "❌ Geçerli bir Telegram ID'si gir."
-        )
+    except (ValueError, TypeError, AttributeError):
+        await message.answer("❌ Geçerli bir Telegram ID'si gir.")
         return
 
-    await state.update_data(
-        user_id=user_id
-    )
+    await state.update_data(user_id=user_id)
+    await state.set_state(AdminStates.ADD_BALANCE_AMOUNT)
 
-    await message.answer(
-        "🪙 Eklenecek Sanal Kredi miktarını gir:"
-    )
-
-    await state.set_state(
-        AdminStates.ADD_BALANCE_AMOUNT
-    )
+    await message.answer("🪙 Eklenecek Sanal Kredi miktarını gir.")
 
 
 @router.message(AdminStates.ADD_BALANCE_AMOUNT)
@@ -343,49 +206,30 @@ async def add_balance_amount(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         await state.clear()
         return
 
-    if message.text == "🔙 Geri":
-        await state.clear()
-
-        await message.answer(
-            "❌ İşlem iptal edildi.",
-            reply_markup=admin_menu()
-        )
-        return
-
     try:
         amount = valid_positive_number(message.text)
-
     except (ValueError, TypeError, AttributeError):
-        await message.answer(
-            "❌ Pozitif ve geçerli bir miktar gir."
-        )
+        await message.answer("❌ Pozitif ve geçerli bir miktar gir.")
         return
 
     data = await state.get_data()
     target_id = data.get("user_id")
 
     async with AsyncSessionLocal() as session:
-
         result = await session.execute(
             select(User)
             .where(User.tg_id == target_id)
             .with_for_update()
         )
-
         user = result.scalar_one_or_none()
 
         if user is None:
             await state.clear()
-
-            await message.answer(
-                "❌ Kullanıcı bulunamadı.",
-                reply_markup=admin_menu()
-            )
+            await message.answer("❌ Kullanıcı bulunamadı.")
             return
 
         user.balance = (user.balance or 0) + amount
@@ -396,7 +240,6 @@ async def add_balance_amount(
             user.bankruptcy_chat_id = None
 
         new_balance = user.balance
-
         await session.commit()
 
     await state.clear()
@@ -406,7 +249,6 @@ async def add_balance_amount(
         f"👤 Kullanıcı ID: {target_id}\n"
         f"🪙 Eklenen: +{amount:,.2f} Sanal Kredi\n"
         f"💰 Yeni bakiye: {new_balance:,.2f} Sanal Kredi",
-        reply_markup=admin_menu(),
         parse_mode="Markdown"
     )
 
@@ -415,24 +257,21 @@ async def add_balance_amount(
 # KULLANICI ENGELLEME
 # --------------------------------------------------
 
-@router.message(F.text.endswith("Kullanıcıyı Engelle"))
+@router.message(Command("ban"))
 async def block_user_start(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         return
 
     await state.clear()
+    await state.set_state(AdminStates.BLOCK_USER)
 
     await message.answer(
-        "🚫 Engellemek istediğin kullanıcının "
-        "Telegram ID'sini gir:",
-        reply_markup=back_button()
+        "🚫 Engellenecek kullanıcının Telegram ID'sini gir.\n"
+        "İptal etmek için /iptal yaz."
     )
-
-    await state.set_state(AdminStates.BLOCK_USER)
 
 
 @router.message(AdminStates.BLOCK_USER)
@@ -440,18 +279,8 @@ async def block_user_process(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         await state.clear()
-        return
-
-    if message.text == "🔙 Geri":
-        await state.clear()
-
-        await message.answer(
-            "❌ İşlem iptal edildi.",
-            reply_markup=admin_menu()
-        )
         return
 
     try:
@@ -459,38 +288,29 @@ async def block_user_process(
 
         if target_id <= 0:
             raise ValueError
-
-    except (ValueError, TypeError):
-        await message.answer(
-            "❌ Geçerli bir Telegram ID'si gir."
-        )
+    except (ValueError, TypeError, AttributeError):
+        await message.answer("❌ Geçerli bir Telegram ID'si gir.")
         return
 
     if target_id in ADMINS:
         await message.answer(
-            "⛔ Başka bir yöneticiyi bu panelden engelleyemezsin."
+            "⛔ Başka bir yöneticiyi engelleyemezsin."
         )
         return
 
     async with AsyncSessionLocal() as session:
-
         result = await session.execute(
             update(User)
             .where(User.tg_id == target_id)
             .values(is_blocked=True)
         )
-
         found = result.rowcount > 0
-
         await session.commit()
 
     await state.clear()
 
     if not found:
-        await message.answer(
-            "❌ Kullanıcı bulunamadı.",
-            reply_markup=admin_menu()
-        )
+        await message.answer("❌ Kullanıcı bulunamadı.")
         return
 
     try:
@@ -502,8 +322,74 @@ async def block_user_process(
         pass
 
     await message.answer(
-        f"✅ {target_id} ID'li kullanıcı engellendi.",
-        reply_markup=admin_menu()
+        f"✅ {target_id} ID'li kullanıcı engellendi."
+    )
+
+
+# --------------------------------------------------
+# KULLANICI ENGELİNİ KALDIRMA
+# --------------------------------------------------
+
+@router.message(Command("unban"))
+async def unblock_user_start(
+    message: Message,
+    state: FSMContext
+):
+    if not await check_admin(message):
+        return
+
+    await state.clear()
+    await state.set_state(AdminStates.UNBLOCK_USER)
+
+    await message.answer(
+        "🔓 Engeli kaldırılacak kullanıcının Telegram ID'sini gir.\n"
+        "İptal etmek için /iptal yaz."
+    )
+
+
+@router.message(AdminStates.UNBLOCK_USER)
+async def process_unblock_user(
+    message: Message,
+    state: FSMContext
+):
+    if not await check_admin(message):
+        await state.clear()
+        return
+
+    try:
+        target_id = int(message.text)
+
+        if target_id <= 0:
+            raise ValueError
+    except (ValueError, TypeError, AttributeError):
+        await message.answer("❌ Geçerli bir Telegram ID'si gir.")
+        return
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            update(User)
+            .where(User.tg_id == target_id)
+            .values(is_blocked=False)
+        )
+        found = result.rowcount > 0
+        await session.commit()
+
+    await state.clear()
+
+    if not found:
+        await message.answer("❌ Kullanıcı bulunamadı.")
+        return
+
+    try:
+        await message.bot.send_message(
+            target_id,
+            "✅ Hesabının engeli yönetici tarafından kaldırıldı."
+        )
+    except Exception:
+        pass
+
+    await message.answer(
+        f"✅ {target_id} ID'li kullanıcının engeli kaldırıldı."
     )
 
 
@@ -511,14 +397,12 @@ async def block_user_process(
 # İSTATİSTİKLER
 # --------------------------------------------------
 
-@router.message(F.text.endswith("İstatistikler"))
+@router.message(Command("stats"))
 async def show_stats(message: Message):
-
     if not await check_admin(message):
         return
 
     async with AsyncSessionLocal() as session:
-
         total_users = await session.scalar(
             select(func.count(User.id))
         )
@@ -529,12 +413,7 @@ async def show_stats(message: Message):
         )
 
         total_balance = await session.scalar(
-            select(
-                func.coalesce(
-                    func.sum(User.balance),
-                    0
-                )
-            )
+            select(func.coalesce(func.sum(User.balance), 0))
         )
 
         bankrupt_users = await session.scalar(
@@ -542,36 +421,31 @@ async def show_stats(message: Message):
             .where(User.is_bankrupt.is_(True))
         )
 
-    stats_text = (
+    await message.answer(
         "📊 **ÖZVEGAS İSTATİSTİKLERİ**\n\n"
         f"👥 Toplam kullanıcı: {total_users or 0}\n"
         f"🚫 Engellenen kullanıcı: {blocked_users or 0}\n"
         f"💸 İflas eden kullanıcı: {bankrupt_users or 0}\n"
         f"🪙 Dağıtılmış toplam Sanal Kredi: "
-        f"{(total_balance or 0):,.2f}"
-    )
-
-    await message.answer(
-        stats_text,
-        reply_markup=admin_menu(),
+        f"{(total_balance or 0):,.2f}",
         parse_mode="Markdown"
     )
 
 
 # --------------------------------------------------
-# OYUN ÇARPANI AYARLARI
+# OYUN ÇARPANLARI
 # --------------------------------------------------
 
-@router.message(F.text.endswith("Oyun Çarpanları"))
+@router.message(Command("multiplier"))
 async def adjust_multiplier_start(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         return
 
     await state.clear()
+    await state.set_state(AdminStates.GAME_MULTIPLIER_NAME)
 
     await message.answer(
         "🎮 Çarpanını düzenlemek istediğin oyunun adını gir:\n\n"
@@ -580,12 +454,8 @@ async def adjust_multiplier_start(
         "roulette\n"
         "blackjack\n"
         "mines\n"
-        "crash",
-        reply_markup=back_button()
-    )
-
-    await state.set_state(
-        AdminStates.GAME_MULTIPLIER_NAME
+        "crash\n\n"
+        "İptal etmek için /iptal yaz."
     )
 
 
@@ -594,18 +464,8 @@ async def adjust_multiplier_name(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         await state.clear()
-        return
-
-    if message.text == "🔙 Geri":
-        await state.clear()
-
-        await message.answer(
-            "❌ İşlem iptal edildi.",
-            reply_markup=admin_menu()
-        )
         return
 
     valid_games = [
@@ -621,23 +481,15 @@ async def adjust_multiplier_name(
 
     if game_name not in valid_games:
         await message.answer(
-            "❌ Geçersiz oyun adı.\n\n"
+            "❌ Geçersiz oyun adı.\n"
             f"Kullanılabilir oyunlar: {', '.join(valid_games)}"
         )
         return
 
-    await state.update_data(
-        game_name=game_name
-    )
+    await state.update_data(game_name=game_name)
+    await state.set_state(AdminStates.GAME_MULTIPLIER_VALUE)
 
-    await message.answer(
-        "Yeni çarpan değerini gir.\n"
-        "Örnek: 1.5"
-    )
-
-    await state.set_state(
-        AdminStates.GAME_MULTIPLIER_VALUE
-    )
+    await message.answer("Yeni çarpan değerini gir. Örnek: 1.5")
 
 
 @router.message(AdminStates.GAME_MULTIPLIER_VALUE)
@@ -645,27 +497,14 @@ async def adjust_multiplier_value(
     message: Message,
     state: FSMContext
 ):
-
     if not await check_admin(message):
         await state.clear()
         return
 
-    if message.text == "🔙 Geri":
-        await state.clear()
-
-        await message.answer(
-            "❌ İşlem iptal edildi.",
-            reply_markup=admin_menu()
-        )
-        return
-
     try:
         multiplier = valid_positive_number(message.text)
-
     except (ValueError, TypeError, AttributeError):
-        await message.answer(
-            "❌ Pozitif ve geçerli bir çarpan gir."
-        )
+        await message.answer("❌ Pozitif ve geçerli bir çarpan gir.")
         return
 
     data = await state.get_data()
@@ -673,15 +512,12 @@ async def adjust_multiplier_value(
 
     if game_name is None:
         await state.clear()
-
         await message.answer(
-            "❌ Oyun bilgisi bulunamadı. İşlemi yeniden başlat.",
-            reply_markup=admin_menu()
+            "❌ Oyun bilgisi bulunamadı. İşlemi yeniden başlat."
         )
         return
 
     async with AsyncSessionLocal() as session:
-
         result = await session.execute(
             select(GameSettings)
             .where(GameSettings.game_name == game_name)
@@ -696,7 +532,6 @@ async def adjust_multiplier_value(
                 multiplier=multiplier
             )
             session.add(game)
-
         else:
             game.multiplier = multiplier
 
@@ -708,7 +543,6 @@ async def adjust_multiplier_value(
         "✅ **OYUN ÇARPANI KAYDEDİLDİ**\n\n"
         f"🎮 Oyun: {game_name}\n"
         f"📈 Yeni çarpan: {multiplier:g}",
-        reply_markup=admin_menu(),
         parse_mode="Markdown"
-    )
-    
+        )
+        
