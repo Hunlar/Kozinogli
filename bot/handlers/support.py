@@ -1,11 +1,13 @@
-# bot/handlers/support.py
+
 from aiogram import Router, F
-from aiogram.types import Message, ContentType
+from aiogram.types import Message
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
+
 from settings import TECH_SUPPORT_USER_ID
-from bot.keyboards import back_button
-from bot.keyboards import main_menu, admin_menu, games_menu
+from bot.keyboards import back_button, main_menu
+
+
 router = Router()
 
 
@@ -13,43 +15,103 @@ class SupportStates(StatesGroup):
     AWAITING_DESCRIPTION = State()
 
 
-@router.message(F.text == "Тех. поддержка")
-async def start_support_request(message: Message, state: FSMContext):
+@router.message(F.text == "🛠 Destek")
+async def start_support_request(
+    message: Message,
+    state: FSMContext
+):
+    await state.clear()
+
     await message.answer(
-        "Опишите вашу проблему подробно. Вы можете прикрепить текст, фото или другие файлы. "
-        "Мы ответим в ближайшее время.",
+        "🛠 **ÖzVeGas Destek Merkezi**\n\n"
+        "📨 Yaşadığın sorunu ayrıntılı şekilde anlat.\n\n"
+        "Metin, fotoğraf, video, belge veya sesli mesaj "
+        "gönderebilirsin.\n\n"
+        "Ekibimiz talebini inceleyip en kısa sürede "
+        "seninle iletişime geçecektir.\n\n"
+        "❌ İşlemi iptal etmek için Geri butonuna bas.",
         reply_markup=back_button()
     )
-    await state.set_state(SupportStates.AWAITING_DESCRIPTION)
+
+    await state.set_state(
+        SupportStates.AWAITING_DESCRIPTION
+    )
+
+
+@router.message(
+    SupportStates.AWAITING_DESCRIPTION,
+    F.text == "🔙 Geri"
+)
+async def cancel_support_request(
+    message: Message,
+    state: FSMContext
+):
+    await state.clear()
+
+    await message.answer(
+        "❌ Destek talebi iptal edildi.",
+        reply_markup=main_menu(message.from_user.id)
+    )
 
 
 @router.message(SupportStates.AWAITING_DESCRIPTION)
-async def forward_to_support(message: Message, state: FSMContext, bot):
-    # Формируем сообщение для техподдержки
-    user_link = f"https://web.telegram.org/k/#{message.from_user.id}"
-    user_info = f"👤 Пользователь: @{message.from_user.username or 'нет username'}\n🔗 Профиль: {user_link}"
+async def forward_to_support(
+    message: Message,
+    state: FSMContext,
+    bot
+):
+    if not TECH_SUPPORT_USER_ID:
+        await message.answer(
+            "❌ Destek sistemi şu anda yapılandırılmamış. "
+            "Lütfen daha sonra tekrar dene.",
+            reply_markup=main_menu(message.from_user.id)
+        )
+        await state.clear()
+        return
 
-    # Отправляем медиа-контент
-    if message.content_type == ContentType.PHOTO:
-        await bot.send_photo(
-            chat_id=TECH_SUPPORT_USER_ID,
-            photo=message.photo[-1].file_id,
-            caption=f"{user_info}\n\n📨 Сообщение: {message.caption or 'Без текста'}"
-        )
-    elif message.content_type == ContentType.DOCUMENT:
-        await bot.send_document(
-            chat_id=TECH_SUPPORT_USER_ID,
-            document=message.document.file_id,
-            caption=f"{user_info}\n\n📨 Сообщение: {message.caption or 'Без текста'}"
-        )
-    else:
+    username = (
+        f"@{message.from_user.username}"
+        if message.from_user.username
+        else "Kullanıcı adı bulunmuyor"
+    )
+
+    user_info = (
+        "🛠 **YENİ DESTEK TALEBİ**\n\n"
+        f"👤 Kullanıcı: {message.from_user.full_name}\n"
+        f"🔗 Kullanıcı adı: {username}\n"
+        f"🆔 Telegram ID: `{message.from_user.id}`\n"
+        f"💬 Sohbet ID: `{message.chat.id}`"
+    )
+
+    try:
+        # Önce destek ekibine kullanıcı bilgilerini gönder.
         await bot.send_message(
             chat_id=TECH_SUPPORT_USER_ID,
-            text=f"{user_info}\n\n📨 Сообщение:\n{message.text}"
+            text=user_info,
+            parse_mode="Markdown"
         )
-    # Подтверждение пользователю
-    await message.answer(
-        "✅ Ваше обращение отправлено! Специалисты свяжутся с вами в ближайшее время.",
-        reply_markup=back_button()
-    )
+
+        # Kullanıcının gönderdiği mesajı tüm medya
+        # türleriyle birlikte destek hesabına kopyala.
+        await bot.copy_message(
+            chat_id=TECH_SUPPORT_USER_ID,
+            from_chat_id=message.chat.id,
+            message_id=message.message_id
+        )
+
+    except Exception:
+        await message.answer(
+            "❌ Destek talebin gönderilemedi.\n"
+            "Lütfen daha sonra tekrar dene.",
+            reply_markup=back_button()
+        )
+        return
+
     await state.clear()
+
+    await message.answer(
+        "✅ Destek talebin başarıyla gönderildi!\n\n"
+        "Ekibimiz başvurunu inceleyecek ve seninle "
+        "en kısa sürede iletişime geçecektir.",
+        reply_markup=main_menu(message.from_user.id)
+    )
