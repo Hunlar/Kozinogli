@@ -1,4 +1,7 @@
 
+from bot.middlewares.bankruptcy import BankruptcyMiddleware
+
+
 def setup_handlers(dp):
     from bot.handlers.auth import router as auth_router
     from bot.handlers.common import router as common_router
@@ -16,17 +19,27 @@ def setup_handlers(dp):
     from bot.handlers.support import router as support_router
     from bot.handlers.admin_handlers import router as admin_router
 
+    game_routers = [
+        slots_router,
+        roulette_router,
+        blackjack_router,
+        mines_router,
+        crash_router,
+        even_odd_router
+    ]
+
+    for router in game_routers:
+        router.message.outer_middleware(BankruptcyMiddleware())
+        router.callback_query.outer_middleware(BankruptcyMiddleware())
+
     dp.include_router(auth_router)
     dp.include_router(common_router)
     dp.include_router(profile_router)
 
     dp.include_router(games_menu_router)
-    dp.include_router(slots_router)
-    dp.include_router(roulette_router)
-    dp.include_router(blackjack_router)
-    dp.include_router(mines_router)
-    dp.include_router(crash_router)
-    dp.include_router(even_odd_router)
+
+    for router in game_routers:
+        dp.include_router(router)
 
     dp.include_router(bonuses_router)
     dp.include_router(support_router)
