@@ -19,28 +19,39 @@ router = Router()
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 DAILY_CREDIT = 20_000
 
+BANK_OWNER_TG_ID = 8658946296
+
 
 @router.message(Command("start"))
-async def start_command(message: Message, state: FSMContext):
+async def start_command(
+    message: Message,
+    state: FSMContext
+):
     await state.clear()
 
     telegram_id = message.from_user.id
     today = datetime.now(ISTANBUL).date()
 
     async with AsyncSessionLocal() as session:
+
         result = await session.execute(
-            select(User).where(User.tg_id == telegram_id)
+            select(User)
+            .where(User.tg_id == telegram_id)
+            .with_for_update()
         )
 
         user = result.scalar_one_or_none()
 
         if user is None:
+
             user = User(
                 tg_id=telegram_id,
                 login=f"user_{telegram_id}",
                 balance=DAILY_CREDIT,
                 is_blocked=False,
-                daily_credit_date=today
+                daily_credit_date=today,
+                is_bankrupt=False,
+                bankruptcy_announced=False
             )
 
             session.add(user)
@@ -55,6 +66,7 @@ async def start_command(message: Message, state: FSMContext):
             )
 
         else:
+
             welcome_text = (
                 "🎰 ÖzVeGas'a tekrar hoş geldin!\n\n"
                 f"🪙 Bakiyen: {(user.balance or 0):,.2f} "
@@ -62,7 +74,16 @@ async def start_command(message: Message, state: FSMContext):
                 "🎮 İyi eğlenceler!"
             )
 
+        if telegram_id == BANK_OWNER_TG_ID:
+            welcome_text += (
+                "\n\n🏦 **ÖzVeGas Kasası sahibi olarak "
+                "tanımlandın.**"
+            )
+
+        await session.commit()
+
     await message.answer(
         welcome_text,
-        reply_markup=main_menu(user_id=telegram_id)
+        reply_markup=main_menu(user_id=telegram_id),
+        parse_mode="Markdown"
     )
