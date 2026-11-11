@@ -1,5 +1,6 @@
 
 from bot.middlewares.bankruptcy import BankruptcyMiddleware
+from bot.middlewares.start_required import StartRequiredMiddleware
 
 
 def setup_handlers(dp):
@@ -21,6 +22,10 @@ def setup_handlers(dp):
     from bot.handlers.support import router as support_router
     from bot.handlers.admin_handlers import router as admin_router
 
+    # Bota özelden /start vermeyenleri tüm grup mesajlarında engelle.
+    dp.message.middleware(StartRequiredMiddleware())
+    dp.callback_query.middleware(StartRequiredMiddleware())
+
     game_routers = [
         slots_router,
         roulette_router,
@@ -30,32 +35,20 @@ def setup_handlers(dp):
         even_odd_router
     ]
 
-    # İflas kontrolü yalnızca eşleşen oyun handler'larında çalışır.
+    # İflas kontrolü yalnızca oyunlarda çalışır.
     for game_router in game_routers:
-        game_router.message.middleware(
-            BankruptcyMiddleware()
-        )
+        game_router.message.middleware(BankruptcyMiddleware())
+        game_router.callback_query.middleware(BankruptcyMiddleware())
 
-        game_router.callback_query.middleware(
-            BankruptcyMiddleware()
-        )
-
-    # Temel sistemler
     dp.include_router(auth_router)
     dp.include_router(common_router)
     dp.include_router(profile_router)
-
-    # Borç sistemi
     dp.include_router(debt_router)
-
-    # Oyun menüsü
     dp.include_router(games_menu_router)
 
-    # Oyunlar
     for game_router in game_routers:
         dp.include_router(game_router)
 
-    # Diğer sistemler
     dp.include_router(bonuses_router)
     dp.include_router(support_router)
     dp.include_router(admin_router)
