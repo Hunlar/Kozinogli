@@ -1,7 +1,6 @@
-
 from aiogram import Router, F
 from aiogram.types import Message
-from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter
 
 from bot.keyboards import main_menu
 
@@ -9,13 +8,11 @@ from bot.keyboards import main_menu
 router = Router()
 
 
-@router.message(F.text == "🔙 Geri")
-async def back_to_main(
-    message: Message,
-    state: FSMContext
-):
-    await state.clear()
-
+@router.message(
+    StateFilter(None),
+    F.text == "🔙 Geri"
+)
+async def back_to_main(message: Message):
     await message.answer(
         "🏠 Ana menü:",
         reply_markup=main_menu(
