@@ -1,4 +1,7 @@
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -10,7 +13,11 @@ from db.database import AsyncSessionLocal
 from db.models import User
 from bot.keyboards import main_menu
 
+
 router = Router()
+
+ISTANBUL = ZoneInfo("Europe/Istanbul")
+DAILY_CREDIT = 20_000
 
 
 @router.message(Command("start"))
@@ -18,28 +25,44 @@ async def start_command(message: Message, state: FSMContext):
     await state.clear()
 
     telegram_id = message.from_user.id
+    today = datetime.now(ISTANBUL).date()
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User).where(User.tg_id == telegram_id)
         )
+
         user = result.scalar_one_or_none()
 
         if user is None:
             user = User(
                 tg_id=telegram_id,
                 login=f"user_{telegram_id}",
-                balance=0.0,
-                is_blocked=False
+                balance=DAILY_CREDIT,
+                is_blocked=False,
+                daily_credit_date=today
             )
 
             session.add(user)
             await session.commit()
 
+            welcome_text = (
+                "🎰 ÖzVeGas'a hoş geldin!\n\n"
+                "🪙 İlk günlük kredin hesabına eklendi: "
+                "20.000 Sanal Kredi\n\n"
+                "🎮 Oyunlar ücretsizdir.\n"
+                "Bol şans!"
+            )
+
+        else:
+            welcome_text = (
+                "🎰 ÖzVeGas'a tekrar hoş geldin!\n\n"
+                f"🪙 Bakiyen: {(user.balance or 0):,.2f} "
+                "Sanal Kredi\n\n"
+                "🎮 İyi eğlenceler!"
+            )
+
     await message.answer(
-        "🎰 ÖzVeGas'a hoş geldin!\n\n"
-        "🪙 Sanal Kredi ile oyunların keyfini çıkarabilirsin.\n"
-        "🎮 Oyunlar ücretsizdir.\n\n"
-        "Aşağıdaki menüden bir bölüm seçebilirsin.",
+        welcome_text,
         reply_markup=main_menu(user_id=telegram_id)
     )
