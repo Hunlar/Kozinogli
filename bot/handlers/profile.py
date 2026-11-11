@@ -1,36 +1,32 @@
 
-from aiogram import Router, F
-from aiogram.types import Message
+from aiogram import Router
+from aiogram.filters import Command
+from aiogram.types import Message, ReplyKeyboardRemove
 
 from sqlalchemy import select
 
 from db.database import AsyncSessionLocal
 from db.models import User
-from bot.keyboards import profile_menu
 
 
 router = Router()
 
 
-@router.message(F.text == "👤 Profil")
+@router.message(Command("profile"))
 async def show_profile(message: Message):
 
     telegram_id = message.from_user.id
 
     async with AsyncSessionLocal() as session:
-
         result = await session.execute(
-            select(User).where(
-                User.tg_id == telegram_id
-            )
+            select(User).where(User.tg_id == telegram_id)
         )
-
         user = result.scalar_one_or_none()
 
         if user is None:
             await message.answer(
                 "❌ Kullanıcı kaydın bulunamadı.\n"
-                "/start komutunu kullanarak yeniden başlayabilirsin."
+                "/start komutunu kullan."
             )
             return
 
@@ -51,12 +47,12 @@ async def show_profile(message: Message):
         if user.is_bankrupt:
             text += (
                 "\n\n💸 **Hesap Durumu: İFLAS**\n"
-                "Yeni oyunlar için kasadan borç almalısın.\n"
-                "🏦 Borç işlemi: /borc"
+                "Yeni oyunlar için kasadan kredi almalısın.\n"
+                "🏦 Kredi işlemi: /borc"
             )
 
     await message.answer(
         text,
-        reply_markup=profile_menu(),
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
