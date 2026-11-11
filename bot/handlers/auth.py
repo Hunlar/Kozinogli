@@ -26,13 +26,16 @@ async def start_command(
     message: Message,
     state: FSMContext
 ):
+    # Sadece özel sohbetten başlatılabilir.
+    if message.chat.type != "private":
+        return
+
     await state.clear()
 
     telegram_id = message.from_user.id
     today = datetime.now(ISTANBUL).date()
 
     async with AsyncSessionLocal() as session:
-
         result = await session.execute(
             select(User)
             .where(User.tg_id == telegram_id)
@@ -42,7 +45,6 @@ async def start_command(
         user = result.scalar_one_or_none()
 
         if user is None:
-
             user = User(
                 tg_id=telegram_id,
                 login=f"user_{telegram_id}",
@@ -50,11 +52,11 @@ async def start_command(
                 is_blocked=False,
                 daily_credit_date=today,
                 is_bankrupt=False,
-                bankruptcy_announced=False
+                bankruptcy_announced=False,
+                has_started=True
             )
 
             session.add(user)
-            await session.commit()
 
             welcome_text = (
                 "🎰 ÖzVeGas'a hoş geldin!\n\n"
@@ -65,6 +67,8 @@ async def start_command(
             )
 
         else:
+            # Kullanıcının botu özelden başlattığını kaydet.
+            user.has_started = True
 
             welcome_text = (
                 "🎰 ÖzVeGas'a tekrar hoş geldin!\n\n"
