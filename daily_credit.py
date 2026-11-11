@@ -1,5 +1,6 @@
 
 import asyncio
+import logging
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -11,6 +12,9 @@ from db.models import User
 
 ISTANBUL = ZoneInfo("Europe/Istanbul")
 DAILY_CREDIT = 20_000
+BANKRUPTCY_LIMIT = 4_000
+
+logger = logging.getLogger(__name__)
 
 
 async def grant_daily_credits():
@@ -31,9 +35,26 @@ async def grant_daily_credits():
 
         await session.commit()
 
-        print(
-            f"Günlük kredi dağıtımı tamamlandı. "
-            f"Dağıtım yapılan kullanıcı: {result.rowcount}"
+        # Günlük kredi sonrası iflas durumunu düzelt.
+        await session.execute(
+            update(User)
+            .where(
+                User.balance >= BANKRUPTCY_LIMIT,
+                User.is_bankrupt.is_(True)
+            )
+            .values(
+                is_bankrupt=False,
+                bankruptcy_announced=False,
+                bankruptcy_chat_id=None
+            )
+        )
+
+        await session.commit()
+
+        logger.info(
+            "Günlük kredi dağıtımı tamamlandı. "
+            "Dağıtım yapılan kullanıcı: %s",
+            result.rowcount
         )
 
 
@@ -52,4 +73,3 @@ async def daily_credit_loop():
 
         await asyncio.sleep(max(seconds, 1))
         await grant_daily_credits()
-      
