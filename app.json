@@ -17,8 +17,16 @@
   ],
   "env": {
     "BOT_TOKEN": {
-      "description": "Telegram bot tokeni",
+      "description": "Telegram BotFather tokeni",
       "required": true
+    },
+    "API_ID": {
+      "description": "Telegram API ID (kullanılmıyorsa boş bırakılabilir)",
+      "required": false
+    },
+    "API_HASH": {
+      "description": "Telegram API HASH (kullanılmıyorsa boş bırakılabilir)",
+      "required": false
     },
     "ADMINS": {
       "description": "Admin Telegram ID'leri. Virgülle ayırın.",
@@ -30,6 +38,11 @@
     },
     "TECH_SUPPORT_USER_ID": {
       "description": "Teknik destek hesabının Telegram ID'si",
+      "required": true
+    },
+    "BANK_OWNER_TG_ID": {
+      "description": "ÖzVeGas kasa sahibinin Telegram ID'si",
+      "value": "8658946296",
       "required": true
     },
     "BANKRUPTCY_VIDEO_FILE_ID": {
