@@ -19,7 +19,6 @@ from sqlalchemy import select
 from db.database import AsyncSessionLocal
 from db.models import User
 
-from bot.keyboards import bet_kb
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -95,7 +94,6 @@ async def render_hand(
     parts = []
 
     for index, card in enumerate(hand):
-
         if index == 1 and hide_second:
             parts.append("🂠")
         else:
@@ -144,10 +142,16 @@ async def start_blackjack(
 ):
     await state.clear()
 
+    owner_id = message.from_user.id
+
+    await state.update_data(
+        owner_id=owner_id
+    )
+
     await message.answer(
         "🃏 **Blackjack**\n\n"
         "🪙 Oynamak istediğin bahis miktarını gir:",
-        reply_markup=bet_kb(),
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
 
@@ -156,12 +160,17 @@ async def start_blackjack(
 
 @router.message(
     BlackjackStates.BET,
-    F.text == "🔙 Geri"
+    Command("iptal")
 )
 async def cancel_bet(
     message: Message,
     state: FSMContext
 ):
+    data = await state.get_data()
+
+    if data.get("owner_id") != message.from_user.id:
+        return
+
     await state.clear()
 
     await message.answer(
@@ -175,6 +184,19 @@ async def process_bet(
     message: Message,
     state: FSMContext
 ):
+    data = await state.get_data()
+
+    owner_id = data.get("owner_id")
+
+    # Bahis yalnızca oyunu başlatan kişiden alınır.
+    if owner_id != message.from_user.id:
+        return
+
+    if not message.text:
+        return await message.answer(
+            "❌ Lütfen bahis miktarını sayı olarak gir."
+        )
+
     try:
         bet = Decimal(
             message.text.replace(",", ".").strip()
@@ -191,7 +213,7 @@ async def process_bet(
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(User)
-            .where(User.tg_id == message.from_user.id)
+            .where(User.tg_id == owner_id)
             .with_for_update()
         )
 
@@ -201,8 +223,7 @@ async def process_bet(
             await state.clear()
 
             return await message.answer(
-                "❌ Kullanıcı hesabın bulunamadı.",
-                reply_markup=ReplyKeyboardRemove()
+                "❌ Kullanıcı hesabın bulunamadı."
             )
 
         balance = Decimal(str(user.balance or 0))
@@ -211,8 +232,7 @@ async def process_bet(
             await state.clear()
 
             return await message.answer(
-                "❌ Yeterli Sanal Kredin yok.",
-                reply_markup=ReplyKeyboardRemove()
+                "❌ Yeterli Sanal Kredin yok."
             )
 
         user.balance = balance - bet
@@ -235,7 +255,7 @@ async def process_bet(
         player_hand=player_hand,
         dealer_hand=dealer_hand,
         deck=deck,
-        owner_id=message.from_user.id
+        owner_id=owner_id
     )
 
     player_total = await calculate_hand(player_hand)
@@ -254,9 +274,7 @@ async def process_bet(
         f"➖ Toplam: {player_total}\n\n"
         f"💼 **Dağıtıcının kartları:**\n"
         f"{await render_hand(dealer_hand, hide_second=True)}",
-        reply_markup=blackjack_keyboard(
-            message.from_user.id
-        ),
+        reply_markup=blackjack_keyboard(owner_id),
         parse_mode="Markdown"
     )
 
@@ -319,6 +337,7 @@ async def player_action(
     deck = data["deck"]
 
     if callback.data == f"bj_hit:{owner_id}":
+
         if not deck:
             return await callback.answer(
                 "Kart destesi tükendi.",
@@ -540,14 +559,18 @@ async def restart_game(
     await callback.answer()
     await state.clear()
 
+    await state.update_data(
+        owner_id=owner_id
+    )
+
     await callback.message.answer(
         "🃏 **Blackjack**\n\n"
         "🪙 Yeni bahis miktarını gir:",
-        reply_markup=bet_kb(),
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
 
     await state.set_state(
         BlackjackStates.BET
-    )
-    
+)
+            
