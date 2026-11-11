@@ -9,8 +9,7 @@ from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    ReplyKeyboardRemove
+    InlineKeyboardButton
 )
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -20,7 +19,6 @@ from sqlalchemy import select
 from db.database import AsyncSessionLocal
 from db.models import User
 
-from bot.keyboards import mines_keyboard, bet_kb
 from bot.utils.bankruptcy import check_bankruptcy
 
 
@@ -65,13 +63,22 @@ async def generate_grid(mines: int):
 
 @router.message(Command("mines"))
 @router.message(F.text == "💣 Mayınlar")
-async def start_mines(message: Message, state: FSMContext):
+async def start_mines(
+    message: Message,
+    state: FSMContext
+):
     await state.clear()
+
+    owner_id = message.from_user.id
+
+    await state.update_data(
+        player_id=owner_id
+    )
 
     await message.answer(
         "💣 **Mayınlar**\n\n"
-        "🪙 Bahis miktarını gir:",
-        reply_markup=bet_kb(),
+        "🪙 Bahis miktarını gir:\n\n"
+        "İptal etmek için /iptal yaz.",
         parse_mode="Markdown"
     )
 
@@ -80,35 +87,82 @@ async def start_mines(message: Message, state: FSMContext):
 
 @router.message(
     MinesStates.CHOOSE_BET,
-    F.text == "🔙 Geri"
+    Command("iptal")
 )
-async def cancel_bet(message: Message, state: FSMContext):
+@router.message(
+    MinesStates.CHOOSE_MINES,
+    Command("iptal")
+)
+async def cancel_mines(
+    message: Message,
+    state: FSMContext
+):
+    data = await state.get_data()
+
+    if data.get("player_id") != message.from_user.id:
+        return
+
+    bet = float(data.get("bet", 0) or 0)
+
+    if bet > 0:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User)
+                .where(User.tg_id == message.from_user.id)
+                .with_for_update()
+            )
+
+            user = result.scalar_one_or_none()
+
+            if user is not None:
+                user.balance = (user.balance or 0) + bet
+                await session.commit()
+
     await state.clear()
 
     await message.answer(
-        "❌ Mayınlar oyunu iptal edildi.",
-        reply_markup=ReplyKeyboardRemove()
+        "❌ Mayınlar oyunu iptal edildi."
+        + (
+            f"\n🪙 {bet:,.2f} Sanal Kredi iade edildi."
+            if bet > 0 else ""
+        )
     )
 
 
 @router.message(MinesStates.CHOOSE_BET)
-async def process_bet(message: Message, state: FSMContext):
+async def process_bet(
+    message: Message,
+    state: FSMContext
+):
+    data = await state.get_data()
+
+    owner_id = data.get("player_id")
+
+    if owner_id != message.from_user.id:
+        return
+
+    if not message.text:
+        return await message.answer(
+            "❌ Lütfen bahis miktarını sayı olarak gir."
+        )
 
     try:
-        bet = float(message.text.replace(",", ".").strip())
+        bet = float(
+            message.text.replace(",", ".").strip()
+        )
 
         if not math.isfinite(bet) or bet <= 0:
             raise ValueError
 
     except (ValueError, AttributeError):
-        await message.answer("❌ Geçerli ve pozitif bir bahis miktarı gir.")
-        return
+        return await message.answer(
+            "❌ Geçerli ve pozitif bir bahis miktarı gir."
+        )
 
     async with AsyncSessionLocal() as session:
-
         result = await session.execute(
             select(User)
-            .where(User.tg_id == message.from_user.id)
+            .where(User.tg_id == owner_id)
             .with_for_update()
         )
 
@@ -118,8 +172,7 @@ async def process_bet(message: Message, state: FSMContext):
             await state.clear()
 
             return await message.answer(
-                "❌ Kullanıcı hesabın bulunamadı.",
-                reply_markup=ReplyKeyboardRemove()
+                "❌ Kullanıcı hesabın bulunamadı."
             )
 
         balance = user.balance or 0
@@ -128,78 +181,49 @@ async def process_bet(message: Message, state: FSMContext):
             await state.clear()
 
             return await message.answer(
-                "❌ Yeterli Sanal Kredin yok.",
-                reply_markup=ReplyKeyboardRemove()
+                "❌ Yeterli Sanal Kredin yok."
             )
 
-        # Bahis mevcut sistemdeki gibi hemen düşülür.
         user.balance = balance - bet
-
-        remaining_balance = user.balance
 
         await session.commit()
 
     await state.update_data(
         bet=bet,
-        player_id=message.from_user.id,
-        balance=remaining_balance
+        player_id=owner_id
     )
 
     await message.answer(
-        "💣 Kaç mayınla oynamak istiyorsun?",
-        reply_markup=mines_keyboard()
+        "💣 Kaç mayınla oynamak istiyorsun?\n\n"
+        "3 ile 10 arasında bir sayı yaz.\n"
+        "İptal etmek için /iptal yaz."
     )
 
     await state.set_state(MinesStates.CHOOSE_MINES)
 
 
-@router.message(
-    MinesStates.CHOOSE_MINES,
-    F.text == "🔙 Geri"
-)
-async def cancel_mines(message: Message, state: FSMContext):
+@router.message(MinesStates.CHOOSE_MINES)
+async def process_mines_count(
+    message: Message,
+    state: FSMContext
+):
     data = await state.get_data()
 
-    bet = data.get("bet", 0)
+    owner_id = data.get("player_id")
 
-    async with AsyncSessionLocal() as session:
-
-        result = await session.execute(
-            select(User)
-            .where(User.tg_id == message.from_user.id)
-            .with_for_update()
-        )
-
-        user = result.scalar_one_or_none()
-
-        if user is not None:
-            user.balance = (user.balance or 0) + bet
-            await session.commit()
-
-    await state.clear()
-
-    await message.answer(
-        "❌ Oyun iptal edildi. Bahsin iade edildi.",
-        reply_markup=ReplyKeyboardRemove()
-    )
-
-
-@router.message(MinesStates.CHOOSE_MINES)
-async def process_mines_count(message: Message, state: FSMContext):
+    if owner_id != message.from_user.id:
+        return
 
     try:
-        mines = int(message.text)
+        mines = int(message.text.strip())
 
         if not 3 <= mines <= 10:
             raise ValueError
 
-    except (ValueError, TypeError):
-        await message.answer(
+    except (ValueError, TypeError, AttributeError):
+        return await message.answer(
             "❌ Mayın sayısı 3 ile 10 arasında olmalı."
         )
-        return
-
-    data = await state.get_data()
 
     grid, opened = await generate_grid(mines)
 
@@ -212,24 +236,37 @@ async def process_mines_count(message: Message, state: FSMContext):
         won=0.0
     )
 
+    bet = data["bet"]
+
     text = (
         f"💣 Mayın sayısı: {mines}\n"
-        f"🪙 Bahis: {data['bet']:,.2f} Sanal Kredi\n"
+        f"🪙 Bahis: {bet:,.2f} Sanal Kredi\n"
         f"📈 Çarpan: x1.00\n"
         f"💰 İlk güvenli seçimden sonraki ödeme: "
-        f"{data['bet'] * BASE_MULTIPLIER:,.2f} Sanal Kredi\n\n"
+        f"{bet * BASE_MULTIPLIER:,.2f} Sanal Kredi\n\n"
         "🟦 Güvenli kareleri aç ve kazancını artır!"
     )
 
-    await message.answer(
+    msg = await message.answer(
         text,
-        reply_markup=await render_grid(opened)
+        reply_markup=await render_grid(
+            opened,
+            owner_id
+        )
+    )
+
+    await state.update_data(
+        message_id=msg.message_id
     )
 
     await state.set_state(MinesStates.PLAYING)
 
 
-async def render_grid(opened, show_controls=True):
+async def render_grid(
+    opened,
+    owner_id: int,
+    show_controls=True
+):
     buttons = []
 
     for i, row in enumerate(opened):
@@ -241,7 +278,7 @@ async def render_grid(opened, show_controls=True):
             button_row.append(
                 InlineKeyboardButton(
                     text=text,
-                    callback_data=f"{i}_{j}"
+                    callback_data=f"mines:{owner_id}:{i}:{j}"
                 )
             )
 
@@ -251,7 +288,7 @@ async def render_grid(opened, show_controls=True):
         buttons.append([
             InlineKeyboardButton(
                 text="🏃 Kazancı Al",
-                callback_data="cashout"
+                callback_data=f"mines_cashout:{owner_id}"
             )
         ])
 
@@ -260,7 +297,11 @@ async def render_grid(opened, show_controls=True):
     )
 
 
-async def reveal_grid(grid, opened):
+async def reveal_grid(
+    grid,
+    opened,
+    owner_id: int
+):
     buttons = []
 
     for i, row in enumerate(grid):
@@ -272,7 +313,7 @@ async def reveal_grid(grid, opened):
             button_row.append(
                 InlineKeyboardButton(
                     text=text,
-                    callback_data="mines_finished"
+                    callback_data=f"mines_finished:{owner_id}"
                 )
             )
 
@@ -288,38 +329,36 @@ async def cashout(
     state: FSMContext,
     data: dict
 ):
-    if callback.from_user.id != data.get("player_id"):
-        await callback.answer(
+    owner_id = data.get("player_id")
+
+    if callback.from_user.id != owner_id:
+        return await callback.answer(
             "Bu oyun başka bir oyuncuya ait.",
             show_alert=True
         )
-        return
 
     won = data.get("won", 0)
 
     if won <= 0:
-        await callback.answer(
+        return await callback.answer(
             "Henüz alabileceğin bir kazanç yok.",
             show_alert=True
         )
-        return
 
     async with AsyncSessionLocal() as session:
-
         result = await session.execute(
             select(User)
-            .where(User.tg_id == callback.from_user.id)
+            .where(User.tg_id == owner_id)
             .with_for_update()
         )
 
         user = result.scalar_one_or_none()
 
         if user is None:
-            await callback.answer(
+            return await callback.answer(
                 "Kullanıcı hesabı bulunamadı.",
                 show_alert=True
             )
-            return
 
         user.balance = (user.balance or 0) + won
 
@@ -336,7 +375,11 @@ async def cashout(
 
     try:
         await callback.message.edit_reply_markup(
-            reply_markup=await reveal_grid(grid, opened)
+            reply_markup=await reveal_grid(
+                grid,
+                opened,
+                owner_id
+            )
         )
     except Exception:
         pass
@@ -345,7 +388,7 @@ async def cashout(
 
     await check_bankruptcy(
         bot=callback.bot,
-        telegram_id=callback.from_user.id,
+        telegram_id=owner_id,
         chat_id=callback.message.chat.id,
         chat_type=callback.message.chat.type,
         first_name=callback.from_user.first_name
@@ -355,11 +398,12 @@ async def cashout(
         "🏆 **Kazancı aldın!**\n\n"
         f"🪙 Ödeme: {won:,.2f} Sanal Kredi\n"
         f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi",
-        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
 
-    await callback.answer("Kazancın hesabına eklendi!")
+    await callback.answer(
+        "Kazancın hesabına eklendi!"
+    )
 
 
 @router.callback_query(MinesStates.PLAYING)
@@ -367,29 +411,56 @@ async def process_cell(
     callback: CallbackQuery,
     state: FSMContext
 ):
-
     data = await state.get_data()
 
     if not data:
-        await callback.answer(
+        return await callback.answer(
             "Oyun oturumu bulunamadı.",
             show_alert=True
         )
-        return
 
-    if callback.from_user.id != data.get("player_id"):
-        await callback.answer(
+    owner_id = data.get("player_id")
+
+    if callback.from_user.id != owner_id:
+        return await callback.answer(
             "Bu oyun başka bir oyuncuya ait.",
             show_alert=True
         )
-        return
 
-    if callback.data == "cashout":
+    if not callback.message:
+        return await callback.answer(
+            "Oyun mesajına ulaşılamadı.",
+            show_alert=True
+        )
+
+    if callback.message.message_id != data.get("message_id"):
+        return await callback.answer(
+            "Bu oyun mesajı artık geçerli değil.",
+            show_alert=True
+        )
+
+    if callback.data == f"mines_cashout:{owner_id}":
         await cashout(callback, state, data)
         return
 
+    if callback.data == f"mines_finished:{owner_id}":
+        return await callback.answer(
+            "Bu oyun tamamlandı.",
+            show_alert=True
+        )
+
     try:
-        row, col = map(int, callback.data.split("_"))
+        parts = callback.data.split(":")
+
+        if len(parts) != 4 or parts[0] != "mines":
+            raise ValueError
+
+        callback_owner = int(parts[1])
+        row = int(parts[2])
+        col = int(parts[3])
+
+        if callback_owner != owner_id:
+            raise ValueError
 
         if not (
             0 <= row < GRID_SIZE
@@ -398,8 +469,10 @@ async def process_cell(
             raise ValueError
 
     except (ValueError, AttributeError):
-        await callback.answer("Geçersiz kare.")
-        return
+        return await callback.answer(
+            "Geçersiz kare.",
+            show_alert=True
+        )
 
     grid = data["grid"]
     opened = data["opened"]
@@ -409,12 +482,12 @@ async def process_cell(
     multiplier = data["multiplier"]
 
     if opened[row][col]:
-        await callback.answer("Bu kare zaten açılmış.")
-        return
+        return await callback.answer(
+            "Bu kare zaten açılmış."
+        )
 
     await callback.answer()
 
-    # Açılma animasyonu.
     for i in range(3):
         try:
             await callback.message.edit_text(
@@ -427,20 +500,17 @@ async def process_cell(
         except Exception:
             pass
 
-    # Mayına basılırsa bahis kaybedilir.
     if grid[row][col] == EMOJI_MINE:
-
         await show_game_over(
             callback,
             state,
             grid,
             opened,
-            bet
+            bet,
+            owner_id
         )
-
         return
 
-    # Güvenli kare.
     opened[row][col] = True
     safe += 1
     multiplier *= BASE_MULTIPLIER
@@ -473,7 +543,10 @@ async def process_cell(
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=await render_grid(opened)
+            reply_markup=await render_grid(
+                opened,
+                owner_id
+            )
         )
     except Exception:
         pass
@@ -484,14 +557,13 @@ async def show_game_over(
     state: FSMContext,
     grid,
     opened,
-    bet
+    bet,
+    owner_id
 ):
-
     async with AsyncSessionLocal() as session:
-
         result = await session.execute(
             select(User)
-            .where(User.tg_id == callback.from_user.id)
+            .where(User.tg_id == owner_id)
         )
 
         user = result.scalar_one_or_none()
@@ -504,7 +576,11 @@ async def show_game_over(
 
     try:
         await callback.message.edit_reply_markup(
-            reply_markup=await reveal_grid(grid, opened)
+            reply_markup=await reveal_grid(
+                grid,
+                opened,
+                owner_id
+            )
         )
     except Exception:
         pass
@@ -513,7 +589,7 @@ async def show_game_over(
 
     await check_bankruptcy(
         bot=callback.bot,
-        telegram_id=callback.from_user.id,
+        telegram_id=owner_id,
         chat_id=callback.message.chat.id,
         chat_type=callback.message.chat.type,
         first_name=callback.from_user.first_name
@@ -523,7 +599,6 @@ async def show_game_over(
         "💥 **Mayına bastın!**\n\n"
         f"🪙 Kaybedilen bahis: {bet:,.2f} Sanal Kredi\n"
         f"💰 Güncel bakiye: {balance:,.2f} Sanal Kredi",
-        reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
-    )
+        )
     
