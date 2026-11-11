@@ -1,41 +1,101 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey
-from sqlalchemy.orm import relationship
-from sqlalchemy.ext.declarative import declarative_base
+
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Float,
+    DateTime,
+    Boolean,
+    ForeignKey,
+    Date
+)
+from sqlalchemy.orm import declarative_base
 from datetime import datetime
+
 
 Base = declarative_base()
 
+
 class User(Base):
     __tablename__ = "users"
+
     id = Column(Integer, primary_key=True)
-    tg_id = Column(Integer, unique=True)
+    tg_id = Column(Integer, unique=True, nullable=False)
     is_blocked = Column(Boolean, default=False)
     login = Column(String(50), unique=True)
     password = Column(String(100))
+
     balance = Column(Float, default=0.0)
-    subscription_end = Column(DateTime, nullable=True)
     current_bet = Column(Float, default=0.0)
+
+    # Kullanıcının son günlük kredi aldığı tarih
+    daily_credit_date = Column(Date, nullable=True)
+
+    # Eski alanlar; mevcut verilerle uyumluluk için korunuyor
+    subscription_end = Column(DateTime, nullable=True)
     last_roulette_spin = Column(DateTime, nullable=True)
+
 
 class Coupon(Base):
     __tablename__ = "coupons"
+
     id = Column(Integer, primary_key=True)
     code = Column(String(50), unique=True)
     uses_left = Column(Integer, default=1)
     is_active = Column(Boolean, default=True)
-    days_added = Column(Integer)  # Количество дней для продления подписки
+    days_added = Column(Integer)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+
 
 class GameSettings(Base):
     __tablename__ = "game_settings"
+
     id = Column(Integer, primary_key=True)
     game_name = Column(String(50), unique=True)
     multiplier = Column(Float, default=1.0)
 
+
 class Transaction(Base):
     __tablename__ = "transactions"
+
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     amount = Column(Float)
-    type = Column(String(20))  # 'topup' или 'purchase'
+    type = Column(String(20))
     created_at = Column(DateTime, default=datetime.now)
+
+
+class BankAccount(Base):
+    __tablename__ = "bank_accounts"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True, nullable=False)
+
+    # Kasa sınırsız olduğunda bakiyesinden düşüş yapılmaz.
+    balance = Column(Float, default=0.0)
+    is_unlimited = Column(Boolean, default=True)
+
+
+class Debt(Base):
+    __tablename__ = "debts"
+
+    id = Column(Integer, primary_key=True)
+
+    # lender_id boşsa borç veren ÖzVeGas kasasıdır.
+    lender_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True
+    )
+
+    borrower_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
+
+    amount = Column(Float, nullable=False)
+    is_paid = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=datetime.now)
+    paid_at = Column(DateTime, nullable=True)
