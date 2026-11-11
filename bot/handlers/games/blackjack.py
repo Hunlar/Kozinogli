@@ -44,7 +44,6 @@ CARD_EMOJIS = {
 def get_card_emoji(card: tuple) -> str:
     value, suit = card[0][:-1], card[0][-1]
     emoji_value = CARD_EMOJIS.get(value, value)
-
     return f"{emoji_value}{CARD_EMOJIS[suit]}"
 
 
@@ -79,7 +78,6 @@ def create_deck():
     ] * 4
 
     random.shuffle(deck)
-
     return deck
 
 
@@ -220,7 +218,6 @@ async def process_bet(
             )
 
         user.balance = balance - bet
-
         await session.commit()
 
     deck = create_deck()
@@ -246,13 +243,11 @@ async def process_bet(
     player_total = await calculate_hand(player_hand)
 
     if player_total == 21:
-
         await end_game(
             message,
             state,
             instant_blackjack=True
         )
-
         return
 
     msg = await message.answer(
@@ -338,7 +333,6 @@ async def player_action(
         player_total = await calculate_hand(player_hand)
 
         if player_total > 21:
-
             await callback.answer()
 
             await end_game(
@@ -346,7 +340,6 @@ async def player_action(
                 state,
                 busted=True
             )
-
             return
 
         await callback.message.edit_text(
@@ -404,32 +397,26 @@ async def end_game(
     dealer_total = await calculate_hand(dealer_hand)
 
     if instant_blackjack:
-
         result = "🎉 BLACKJACK! x2,5 ödeme!"
         payout = bet * 2.5
 
     elif busted:
-
         result = "💥 21'i aştın! Bahsi kaybettin."
         payout = 0
 
     elif dealer_total > 21:
-
         result = "🎉 Dağıtıcı 21'i aştı! Kazandın."
         payout = bet * 2
 
     elif player_total > dealer_total:
-
         result = "🎉 Kazandın!"
         payout = bet * 2
 
     elif player_total < dealer_total:
-
         result = "💼 Dağıtıcı kazandı."
         payout = 0
 
     else:
-
         result = "🤝 Berabere! Bahsin iade edildi."
         payout = bet
 
@@ -458,7 +445,6 @@ async def end_game(
             return
 
         user.balance = (user.balance or 0) + payout
-
         final_balance = user.balance
 
         await session.commit()
@@ -470,6 +456,120 @@ async def end_game(
         target_message = event.message
 
         if not instant_blackjack:
+
+            for i in range(len(dealer_hand)):
+
+                revealed = dealer_hand[:i + 1]
+
+                try:
+                    await target_message.edit_text(
+                        f"💼 **Dağıtıcının kartları:**\n"
+                        f"{await render_hand(revealed)}\n"
+                        f"➖ Toplam: "
+                        f"{await calculate_hand(revealed)}\n\n"
+                        f"🃏 **Senin kartların:**\n"
+                        f"{await render_hand(player_hand)}\n"
+                        f"➖ Toplam: {player_total}",
+                        parse_mode="Markdown"
+                    )
+
+                    await asyncio.sleep(0.8)
+
+                except Exception:
+                    pass
+
+    await state.clear()
+
+    chat_id = (
+        event.chat.id
+        if isinstance(event, Message)
+        else event.message.chat.id
+    )
+
+    chat_type = (
+        event.chat.type
+        if isinstance(event, Message)
+        else event.message.chat.type
+    )
+
+    await check_bankruptcy(
+        bot=event.bot,
+        telegram_id=owner_id,
+        chat_id=chat_id,
+        chat_type=chat_type,
+        first_name=event.from_user.first_name or "Oyuncu"
+    )
+
+    final_text = (
+        f"{result}\n\n"
+        f"💼 **Dağıtıcının kartları:**\n"
+        f"{await render_hand(dealer_hand)}\n"
+        f"➖ Toplam: {dealer_total}\n\n"
+        f"🃏 **Senin kartların:**\n"
+        f"{await render_hand(player_hand)}\n"
+        f"➖ Toplam: {player_total}\n\n"
+        f"🪙 Ödeme: {payout:,.2f} Sanal Kredi\n"
+        f"💰 Güncel bakiye: {final_balance:,.2f} Sanal Kredi"
+    )
+
+    if target_message is not None:
+
+        try:
+            await target_message.edit_text(
+                final_text,
+                reply_markup=restart_keyboard(owner_id),
+                parse_mode="Markdown"
+            )
+
+        except Exception:
+            await target_message.answer(
+                final_text,
+                reply_markup=restart_keyboard(owner_id),
+                parse_mode="Markdown"
+            )
+
+    else:
+
+        await event.answer(
+            final_text,
+            reply_markup=restart_keyboard(owner_id),
+            parse_mode="Markdown"
+        )
+
+
+@router.callback_query(F.data.startswith("bj_restart:"))
+async def restart_game(
+    callback: CallbackQuery,
+    state: FSMContext
+):
+
+    try:
+        owner_id = int(callback.data.split(":", 1)[1])
+
+    except (ValueError, IndexError):
+        return await callback.answer(
+            "Geçersiz işlem.",
+            show_alert=True
+        )
+
+    if owner_id != callback.from_user.id:
+        return await callback.answer(
+            "Bu oyun başka bir oyuncuya ait!",
+            show_alert=True
+        )
+
+    await callback.answer()
+    await state.clear()
+
+    await callback.message.answer(
+        "🃏 **Blackjack**\n\n"
+        "🪙 Yeni bahis miktarını gir:",
+        reply_markup=bet_kb(),
+        parse_mode="Markdown"
+    )
+
+    await state.set_state(BlackjackStates.BET)
+
 
             for i in range(len(dealer_hand)):
 
