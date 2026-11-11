@@ -15,8 +15,10 @@ logger = logging.getLogger(__name__)
 # Zorunlu üyelik sohbetleri
 REQUIRED_CHATS = [
     "@emeklisanalci",  # Kanal
-    "@ozturkordusu"    # Grup
+    -1004326389896     # Grup
 ]
+
+GROUP_INVITE_LINK = "https://t.me/+_XbbelgBCFJkZjk0"
 
 
 def subscription_keyboard():
@@ -31,7 +33,7 @@ def subscription_keyboard():
             [
                 InlineKeyboardButton(
                     text="👥 Grubumuza Katıl",
-                    url="https://t.me/+_XbbelgBCFJkZjk0"
+                    url=GROUP_INVITE_LINK
                 )
             ],
             [
