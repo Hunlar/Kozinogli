@@ -2,7 +2,7 @@
 import math
 from datetime import datetime
 
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -18,6 +18,7 @@ from db.models import User, Debt, BankAccount
 router = Router()
 
 BANK_NAME = "OzVeGas Kasa"
+BANK_OWNER_TG_ID = 8658946296
 BANKRUPTCY_LIMIT = 4000
 
 
@@ -32,11 +33,34 @@ def reset_bankruptcy_if_recovered(user: User):
         user.bankruptcy_chat_id = None
 
 
+async def get_bank_owner(session):
+    result = await session.execute(
+        select(User)
+        .where(User.tg_id == BANK_OWNER_TG_ID)
+        .with_for_update()
+    )
+
+    owner = result.scalar_one_or_none()
+
+    if owner is None:
+        owner = User(tg_id=BANK_OWNER_TG_ID)
+        session.add(owner)
+        await session.flush()
+
+    return owner
+
+
 async def give_loan(message: Message, amount: float):
 
     if not math.isfinite(amount) or amount <= 0:
         await message.answer(
             "❌ Geçerli ve sıfırdan büyük bir miktar gir."
+        )
+        return
+
+    if message.from_user.id == BANK_OWNER_TG_ID:
+        await message.answer(
+            "🏦 Kendi kasandan borç alamazsın."
         )
         return
 
@@ -59,7 +83,6 @@ async def give_loan(message: Message, amount: float):
         balance = user.balance or 0
 
         if balance < BANKRUPTCY_LIMIT:
-
             required = BANKRUPTCY_LIMIT - balance
 
             if amount < required:
@@ -69,9 +92,12 @@ async def give_loan(message: Message, amount: float):
                 )
                 return
 
+        owner = await get_bank_owner(session)
+
         bank_result = await session.execute(
             select(BankAccount)
             .where(BankAccount.name == BANK_NAME)
+            .with_for_update()
         )
 
         bank = bank_result.scalar_one_or_none()
@@ -82,7 +108,6 @@ async def give_loan(message: Message, amount: float):
                 balance=0,
                 is_unlimited=True
             )
-
             session.add(bank)
             await session.flush()
 
@@ -94,11 +119,10 @@ async def give_loan(message: Message, amount: float):
 
         user.balance = balance + amount
 
-        # İflastan kurtulma kontrolü.
         reset_bankruptcy_if_recovered(user)
 
         debt = Debt(
-            lender_id=None,
+            lender_id=owner.id,
             borrower_id=user.id,
             amount=amount,
             is_paid=False
@@ -113,7 +137,7 @@ async def give_loan(message: Message, amount: float):
         debt_id = debt.id
 
     await message.answer(
-        "🏦 **ÖzVeGas Kasası**\n\n"
+        "🏦 **ÖzVeGas Kasasından kredi aldın!**\n\n"
         f"🪙 Verilen kredi: {amount:,.2f} Sanal Kredi\n"
         f"📄 Borç numarası: #{debt_id}\n"
         f"💰 Yeni bakiyen: {new_balance:,.2f} Sanal Kredi\n\n"
@@ -130,12 +154,10 @@ async def borrow_command(
 ):
 
     if command.args:
-
         try:
             amount = float(
                 command.args.replace(",", ".").strip()
             )
-
         except ValueError:
             await message.answer(
                 "❌ Kullanım: /borc 10000"
@@ -152,8 +174,15 @@ async def borrow_command(
     await message.answer(
         "🏦 ÖzVeGas Kasasından ne kadar "
         "Sanal Kredi almak istiyorsun?\n\n"
-        "Örnek: 10000"
+        "Örnek: 10000\n\n"
+        "İptal etmek için /iptal yaz."
     )
+
+
+@router.message(Command("iptal"), DebtStates.waiting_for_amount)
+async def cancel_loan(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Borç alma işlemi iptal edildi.")
 
 
 @router.message(DebtStates.waiting_for_amount)
@@ -166,7 +195,6 @@ async def receive_loan_amount(
         amount = float(
             message.text.replace(",", ".").strip()
         )
-
     except (ValueError, AttributeError):
         await message.answer(
             "❌ Sadece geçerli bir sayı gir."
@@ -174,7 +202,6 @@ async def receive_loan_amount(
         return
 
     await state.clear()
-
     await give_loan(message, amount)
 
 
@@ -214,12 +241,9 @@ async def list_debts(message: Message):
         )
         return
 
-    lines = [
-        "📄 **Ödenmemiş Borçların**\n"
-    ]
+    lines = ["📄 **Ödenmemiş Borçların**\n"]
 
     for debt in debts:
-
         lines.append(
             f"📌 Borç No: #{debt.id}\n"
             f"🪙 Miktar: {debt.amount:,.2f} Sanal Kredi\n"
@@ -294,7 +318,22 @@ async def repay_debt(
             )
             return
 
+        lender = None
+
+        if debt.lender_id is not None:
+            lender_result = await session.execute(
+                select(User)
+                .where(User.id == debt.lender_id)
+                .with_for_update()
+            )
+            lender = lender_result.scalar_one_or_none()
+
         user.balance = balance - debt.amount
+
+        if lender is not None:
+            lender.balance = (
+                (lender.balance or 0) + debt.amount
+            )
 
         debt.is_paid = True
         debt.paid_at = datetime.now()
