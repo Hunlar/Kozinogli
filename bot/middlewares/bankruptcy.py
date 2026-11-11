@@ -9,16 +9,44 @@ from db.models import User
 
 BANKRUPTCY_LIMIT = 4000
 
+# Bahis yatırıldıktan sonra tamamlanmasına izin verilen oyun durumları.
+ACTIVE_GAME_STATES = {
+    "BlackjackStates:PLAYER_TURN",
+
+    "MinesStates:CHOOSE_MINES",
+    "MinesStates:PLAYING",
+
+    "CrashStates:COEFF_INPUT",
+    "CrashStates:FLYING",
+}
+
 
 class BankruptcyMiddleware(BaseMiddleware):
 
     async def __call__(self, handler, event, data):
+
         telegram_user = getattr(event, "from_user", None)
 
         if telegram_user is None:
             return await handler(event, data)
 
+        # Devam eden bir oyun varsa oyuncunun hamle yapmasına izin ver.
+        fsm_state = data.get("state")
+
+        if fsm_state is not None:
+            try:
+                current_state = await fsm_state.get_state()
+
+                if current_state in ACTIVE_GAME_STATES:
+                    return await handler(event, data)
+
+            except Exception:
+                # FSM bilgisi alınamazsa güvenli şekilde bakiye
+                # kontrolüne devam et.
+                pass
+
         async with AsyncSessionLocal() as session:
+
             result = await session.execute(
                 select(User).where(
                     User.tg_id == telegram_user.id
@@ -33,25 +61,31 @@ class BankruptcyMiddleware(BaseMiddleware):
             balance = user.balance or 0
 
         if balance < BANKRUPTCY_LIMIT:
+
             warning = (
                 "💸 İFLAS ETTİN!\n\n"
-                f"Mevcut bakiyen: {balance:,.2f} Sanal Kredi\n"
-                f"İflas sınırı: {BANKRUPTCY_LIMIT:,} Sanal Kredi\n\n"
-                "Oyunlara devam edebilmek için borç almalı "
-                "veya bakiyeni artırmalısın.\n\n"
-                "🪙 Borç işlemi için /borc komutunu kullan."
+                f"🪙 Mevcut bakiyen: {balance:,.2f} "
+                "Sanal Kredi\n"
+                f"📉 İflas sınırı: {BANKRUPTCY_LIMIT:,} "
+                "Sanal Kredi\n\n"
+                "Yeni oyunlara başlayabilmek için "
+                "ÖzVeGas kasasından borç almalısın.\n\n"
+                "🏦 Borç işlemi: /borc\n"
+                "📋 Borçlarını görüntüle: /borclarim"
             )
 
             if isinstance(event, Message):
+
                 await event.answer(warning)
 
             elif isinstance(event, CallbackQuery):
+
                 await event.answer(
-                    "İflas ettin! Borç alana kadar oyun oynayamazsın.",
+                    "💸 İflas ettin! Yeni oyunlara "
+                    "başlamak için borç almalısın.",
                     show_alert=True
                 )
 
             return
 
         return await handler(event, data)
-      
