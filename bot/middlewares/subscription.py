@@ -1,18 +1,21 @@
 
-from aiogram import Router
+import logging
+
+from aiogram import Router, BaseMiddleware
 from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton
 )
-from aiogram import BaseMiddleware
 
 router = Router()
+logger = logging.getLogger(__name__)
 
+# Zorunlu üyelik sohbetleri
 REQUIRED_CHATS = [
-    "@ozturkordusu",
-    "@emeklisanalci"
+    "@emeklisanalci",  # Kanal
+    "@ozturkordusu"    # Grup
 ]
 
 
@@ -22,13 +25,13 @@ def subscription_keyboard():
             [
                 InlineKeyboardButton(
                     text="📢 Kanalımıza Katıl",
-                    url="https://t.me/ozturkordusu"
+                    url="https://t.me/emeklisanalci"
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="👥 Grubumuza Katıl",
-                    url="https://t.me/emeklisanalci"
+                    url="https://t.me/ozturkordusu"
                 )
             ],
             [
@@ -56,6 +59,11 @@ async def check_membership(bot, user_id: int) -> bool:
                     return False
 
         except Exception:
+            logger.exception(
+                "Üyelik kontrolü başarısız: %s / %s",
+                user_id,
+                chat
+            )
             return False
 
     return True
@@ -64,6 +72,7 @@ async def check_membership(bot, user_id: int) -> bool:
 class SubscriptionMiddleware(BaseMiddleware):
 
     async def __call__(self, handler, event, data):
+
         if (
             isinstance(event, CallbackQuery)
             and event.data == "check_subscription"
@@ -72,7 +81,7 @@ class SubscriptionMiddleware(BaseMiddleware):
 
         user = getattr(event, "from_user", None)
 
-        if not user:
+        if user is None:
             return await handler(event, data)
 
         bot = data["bot"]
@@ -95,35 +104,43 @@ class SubscriptionMiddleware(BaseMiddleware):
                 parse_mode="Markdown"
             )
 
-        elif isinstance(event, CallbackQuery) and event.message:
-            await event.message.answer(
-                text,
-                reply_markup=subscription_keyboard(),
-                parse_mode="Markdown"
-            )
+        elif isinstance(event, CallbackQuery):
+            if event.message:
+                await event.message.answer(
+                    text,
+                    reply_markup=subscription_keyboard(),
+                    parse_mode="Markdown"
+                )
+
             await event.answer()
 
         return None
 
 
-@router.callback_query(lambda c: c.data == "check_subscription")
+@router.callback_query(
+    lambda callback: callback.data == "check_subscription"
+)
 async def verify_subscription(callback: CallbackQuery):
+
     is_member = await check_membership(
         callback.bot,
         callback.from_user.id
     )
 
     if is_member:
-        await callback.answer("Üyelik doğrulandı!", show_alert=True)
+        await callback.answer(
+            "Üyelik doğrulandı!",
+            show_alert=True
+        )
 
         if callback.message:
             await callback.message.edit_text(
                 "✅ Kanal ve grup üyeliğin doğrulandı!\n\n"
                 "ÖzVeGas'ı kullanmak için /start komutunu gönder."
             )
+
     else:
         await callback.answer(
             "❌ Henüz kanal veya grup üyeliğin tamamlanmamış.",
             show_alert=True
-      )
-      
+        )
