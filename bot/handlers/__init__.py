@@ -18,6 +18,9 @@ def setup_handlers(dp):
     from bot.handlers.games.crash import router as crash_router
     from bot.handlers.games.even_odd import router as even_odd_router
 
+    # Yeni grup Rus ruleti
+    from bot.handlers.games.group_russian_roulette import router as group_russian_roulette_router
+
     from bot.handlers.bonuses import router as bonuses_router
     from bot.handlers.support import router as support_router
     from bot.handlers.admin_handlers import router as admin_router
@@ -32,7 +35,8 @@ def setup_handlers(dp):
         blackjack_router,
         mines_router,
         crash_router,
-        even_odd_router
+        even_odd_router,
+        group_russian_roulette_router
     ]
 
     # İflas kontrolü yalnızca oyunlarda çalışır.
