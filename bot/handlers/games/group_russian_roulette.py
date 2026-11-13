@@ -704,7 +704,7 @@ async def handle_bet_amount(message: Message):
             f"<b>{fmt_amount(amount)} Sanal Kredi</b>",
             parse_mode="HTML",
 )
-        async def close_betting(game_id, bot):
+async def close_betting(game_id, bot):
     await asyncio.sleep(BETTING_SECONDS)
 
     async with LOCK:
