@@ -109,7 +109,11 @@ async def help_navigation(callback: CallbackQuery):
             "/blackjack - Blackjack oyunu\n"
             "/mines - Mayın oyunu\n"
             "/rocket - Roket oyunu\n"
-            "/evenodd - Tek / Çift oyunu",
+            "/evenodd - Tek / Çift oyunu\n\n"
+            "🔫 <b>Grup Rus Ruleti</b>\n"
+            "/kayit - Kullanıcı adını davetler için kaydet\n"
+            "/rulet @username - Grupta oyuncuya düello daveti gönder\n"
+            "Davet edilen oyuncu kabul ederse grup bahisleri başlar.",
             reply_markup=back_keyboard(user_id),
             parse_mode="HTML"
         )
@@ -136,4 +140,3 @@ async def help_navigation(callback: CallbackQuery):
         )
 
     await callback.answer()
-            
