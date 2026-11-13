@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -63,6 +62,8 @@ async def start_command(
                 "🪙 İlk kredin hesabına eklendi: "
                 "20.000 Sanal Kredi\n\n"
                 "🎮 Oyunları komutlarla başlatabilirsin.\n"
+                "🔫 Grup Rus Ruleti için grupta /kayit yaz "
+                "ve ardından /rulet @kullaniciadi komutunu kullan.\n\n"
                 "Yardım için /help yaz."
             )
 
@@ -75,6 +76,8 @@ async def start_command(
                 f"🪙 Bakiyen: {(user.balance or 0):,.2f} "
                 "Sanal Kredi\n\n"
                 "🎮 Oyunları komutlarla başlatabilirsin.\n"
+                "🔫 Grup Rus Ruleti için grupta /kayit yaz "
+                "ve ardından /rulet @kullaniciadi komutunu kullan.\n\n"
                 "Yardım için /help yaz."
             )
 
@@ -90,4 +93,3 @@ async def start_command(
         welcome_text,
         reply_markup=ReplyKeyboardRemove()
     )
-    
