@@ -1,4 +1,3 @@
-
 from bot.middlewares.bankruptcy import BankruptcyMiddleware
 from bot.middlewares.start_required import StartRequiredMiddleware
 
@@ -18,14 +17,17 @@ def setup_handlers(dp):
     from bot.handlers.games.crash import router as crash_router
     from bot.handlers.games.even_odd import router as even_odd_router
 
-    # Yeni grup Rus ruleti
+    # Grup Rus ruleti
     from bot.handlers.games.group_russian_roulette import router as group_russian_roulette_router
+
+    # Sayı tahmin oyunu
+    from bot.handlers.games.number_guess import router as number_guess_router
 
     from bot.handlers.bonuses import router as bonuses_router
     from bot.handlers.support import router as support_router
     from bot.handlers.admin_handlers import router as admin_router
 
-    # Bota özelden /start vermeyenleri tüm grup mesajlarında engelle.
+    # Bota özelden /start vermeyenleri grup mesajlarında engelle.
     dp.message.middleware(StartRequiredMiddleware())
     dp.callback_query.middleware(StartRequiredMiddleware())
 
@@ -36,6 +38,7 @@ def setup_handlers(dp):
         mines_router,
         crash_router,
         even_odd_router,
+        number_guess_router,
         group_russian_roulette_router
     ]
 
