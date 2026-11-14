@@ -1,3 +1,4 @@
+
 import asyncio
 import math
 import random
@@ -17,17 +18,14 @@ from sqlalchemy import select
 
 from db.database import AsyncSessionLocal
 from db.models import User
-from bot.utils.bankruptcy import check_bankruptcy
 
 
 router = Router()
 
-# OYUN AYARLARI
 INVITE_SECONDS = 60
 BETTING_SECONDS = 60
 ANNOUNCEMENT_INTERVAL = 15
 
-# OYUN VERİLERİ
 GAMES = {}
 SEEN_USERS = {}
 PENDING_BETS = {}
@@ -66,11 +64,13 @@ def outcome_result(game, choice):
             f"🟢 Yalnızca "
             f"{escape(game['creator_name'])} hayatta kaldı!"
         )
+
     if choice == "b_alive":
         return (
             f"🟢 Yalnızca "
             f"{escape(game['opponent_name'])} hayatta kaldı!"
         )
+
     return OUTCOME_RESULTS[choice]
 
 
@@ -246,6 +246,7 @@ async def create_duel(message: Message):
         creator_result = await session.execute(
             select(User).where(User.tg_id == creator_id)
         )
+
         target_result = await session.execute(
             select(User).where(User.tg_id == target_id)
         )
@@ -321,11 +322,6 @@ async def expire_invite(game_id, bot):
 
 
 async def publish_betting_messages(game_id, bot):
-    """
-    Her 15 saniyede bir eski duyuruyu siler,
-    yenisini gönderir. Bahis süresince tekrarlar.
-    """
-
     for _ in range(BETTING_SECONDS // ANNOUNCEMENT_INTERVAL):
         game = GAMES.get(game_id)
 
@@ -366,8 +362,8 @@ async def publish_betting_messages(game_id, bot):
 
             game["bet_announcement_id"] = sent.message_id
 
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"Bahis duyurusu gönderilemedi: {error}")
 
         await asyncio.sleep(ANNOUNCEMENT_INTERVAL)
 
@@ -404,7 +400,6 @@ async def roulette_callback(callback: CallbackQuery):
 
     uid = callback.from_user.id
 
-    # DÜELLOYU KABUL ETME / REDDETME
     if action in ("accept", "decline"):
         async with LOCK:
             game = GAMES.get(game_id)
@@ -469,6 +464,7 @@ async def roulette_callback(callback: CallbackQuery):
         asyncio.create_task(
             publish_betting_messages(game_id, callback.bot)
         )
+
         asyncio.create_task(
             close_betting(game_id, callback.bot)
         )
@@ -478,7 +474,6 @@ async def roulette_callback(callback: CallbackQuery):
         )
         return
 
-    # BAHİS YAP BUTONU
     if action == "join":
         if game["status"] != "betting":
             await callback.answer(
@@ -501,12 +496,9 @@ async def roulette_callback(callback: CallbackQuery):
             parse_mode="HTML",
         )
 
-        await callback.answer(
-            "Tahminini seç!"
-        )
+        await callback.answer("Tahminini seç!")
         return
 
-    # SONUÇ SEÇİMİ
     if action == "pick":
         if len(parts) != 4:
             await callback.answer(
@@ -551,9 +543,7 @@ async def roulette_callback(callback: CallbackQuery):
                 "choice": choice,
             }
 
-        await callback.answer(
-            "Sonuç seçildi."
-        )
+        await callback.answer("Sonuç seçildi.")
 
         await callback.message.answer(
             f"{escape(callback.from_user.full_name)}, "
@@ -567,8 +557,7 @@ async def roulette_callback(callback: CallbackQuery):
         "Bilinmeyen işlem.",
         show_alert=True
     )
-
-
+    
 @router.message()
 async def handle_bet_amount(message: Message):
     remember_group_user(message)
@@ -652,14 +641,6 @@ async def handle_bet_amount(message: Message):
             old_bet["amount"] if old_bet else 0.0
         )
 
-        if amount <= old_amount:
-            await message.answer(
-                f"❌ Bahsini artırmalısın. "
-                f"Mevcut bahsin: {fmt_amount(old_amount)} "
-                "Sanal Kredi."
-            )
-            return
-
         difference = round(amount - old_amount, 2)
 
         async with AsyncSessionLocal() as session:
@@ -703,7 +684,9 @@ async def handle_bet_amount(message: Message):
             f"💰 Toplam bahsin: "
             f"<b>{fmt_amount(amount)} Sanal Kredi</b>",
             parse_mode="HTML",
-)
+        )
+
+
 async def close_betting(game_id, bot):
     await asyncio.sleep(BETTING_SECONDS)
 
@@ -717,7 +700,6 @@ async def close_betting(game_id, bot):
 
         bets = dict(game["bets"])
         chat_id = game["chat_id"]
-        message_id = game["message_id"]
         announcement_id = game.get("bet_announcement_id")
 
         result_key = random.choice(list(OUTCOMES.keys()))
@@ -732,7 +714,7 @@ async def close_betting(game_id, bot):
         except Exception:
             pass
 
-    # Tüm bahisleri kuruşa çevirerek hesapla
+    # Bahisleri kuruş cinsinden hesapla
     total_cents = sum(
         int(round(bet["amount"] * 100))
         for bet in bets.values()
@@ -744,123 +726,124 @@ async def close_betting(game_id, bot):
         if bet["choice"] == result_key
     }
 
+    winning_cents = sum(
+        int(round(bet["amount"] * 100))
+        for bet in winners.values()
+    )
+
     payouts = {}
 
-    # Kazanan varsa havuzu kazananlara oranlı dağıt
-    if bets and winners:
-        winning_cents = sum(
-            int(round(bet["amount"] * 100))
-            for bet in winners.values()
-        )
+    if winners and winning_cents > 0:
+        remaining = total_cents
+        winner_list = list(winners.items())
 
-        distributed = 0
-        winner_ids = sorted(winners)
+        for index, (uid, bet) in enumerate(winner_list):
+            stake = int(round(bet["amount"] * 100))
 
-        for uid in winner_ids[:-1]:
-            stake_cents = int(
-                round(winners[uid]["amount"] * 100)
-            )
+            if index == len(winner_list) - 1:
+                payout = remaining
+            else:
+                payout = (
+                    total_cents * stake
+                ) // winning_cents
 
-            share = (
-                total_cents * stake_cents
-            ) // winning_cents
+                remaining -= payout
 
-            payouts[uid] = share
-            distributed += share
+            payouts[uid] = payout
 
-        # Kuruş farkını son kazanana ver
-        if winner_ids:
-            last_uid = winner_ids[-1]
-            payouts[last_uid] = total_cents - distributed
-
-    # Hiç kazanan yoksa herkesin bahsini iade et
-    elif bets:
+    else:
+        # Doğru tahmin yoksa bahisleri iade et
         for uid, bet in bets.items():
             payouts[uid] = int(
                 round(bet["amount"] * 100)
             )
 
-    # Kazançları veya iadeleri hesaplara yatır
-    async with AsyncSessionLocal() as session:
-        for uid, cents in payouts.items():
-            if cents <= 0:
-                continue
+    # Kazançları kullanıcı hesaplarına aktar
+    settlement_lines = []
 
+    async with AsyncSessionLocal() as session:
+        for uid, payout_cents in payouts.items():
             user = await locked_user(session, uid)
 
-            if user is not None:
-                current_balance = user.balance or 0.0
-                user.balance = round(
-                    current_balance + (cents / 100),
-                    2,
+            if user is None:
+                continue
+
+            payout = payout_cents / 100
+
+            user.balance = (
+                (user.balance or 0.0) + payout
+            )
+
+            bet = bets[uid]
+
+            if winners:
+                settlement_lines.append(
+                    f"👤 {escape(bet['name'])}: "
+                    f"<b>+{fmt_amount(payout)} Sanal Kredi</b>"
+                )
+            else:
+                settlement_lines.append(
+                    f"👤 {escape(bet['name'])}: "
+                    f"<b>{fmt_amount(payout)} Sanal Kredi iade</b>"
                 )
 
         await session.commit()
 
     # Sonuç mesajını hazırla
-    result_text = outcome_result(game, result_key)
-
-    if not bets:
-        betting_text = (
-            "💰 Bu düelloya bahis yapan olmadı."
-        )
-    elif not winners:
-        betting_text = (
-            "😮 Hiç kimse doğru tahmin edemedi!\n"
-            "💰 Herkesin bahsi iade edildi."
-        )
-    else:
-        winner_lines = []
-
-        for uid, bet in winners.items():
-            paid = payouts.get(uid, 0) / 100
-
-            winner_lines.append(
-                f"🏆 {escape(bet['name'])}: "
-                f"+{fmt_amount(paid)} Sanal Kredi"
-            )
-
-        betting_text = (
-            "🏆 <b>KAZANAN BAHİSLER</b>\n"
-            + "\n".join(winner_lines)
-        )
-
-    final_text = (
+    result_text = (
         "🔫 <b>RUS RULETİ SONUÇLANDI!</b>\n\n"
         f"⚔️ <b>{escape(game['creator_name'])} VS "
         f"{escape(game['opponent_name'])}</b>\n\n"
-        f"<b>{result_text}</b>\n\n"
-        f"{betting_text}\n\n"
+        f"{outcome_result(game, result_key)}\n\n"
         f"💰 Toplam bahis havuzu: "
-        f"<b>{fmt_amount(total_cents / 100)} Sanal Kredi</b>"
+        f"<b>{fmt_amount(total_cents / 100)} Sanal Kredi</b>\n\n"
     )
 
+    if not bets:
+        result_text += (
+            "📭 Bu düelloya hiç bahis yapılmadı."
+        )
+
+    elif not winners:
+        result_text += (
+            "❌ Doğru tahmin yapan olmadı.\n"
+            "💸 Herkesin bahsi iade edildi."
+        )
+
+        if settlement_lines:
+            result_text += "\n\n" + "\n".join(settlement_lines)
+
+    else:
+        result_text += (
+            "🏆 <b>KAZANAN BAHİSLER</b>\n\n"
+        )
+
+        if settlement_lines:
+            result_text += "\n".join(settlement_lines)
+        else:
+            result_text += "Kazananların hesapları güncellenemedi."
+
+    # Sonucu doğrudan gruba gönder
     try:
-        await bot.edit_message_text(
-            final_text,
+        await bot.send_message(
             chat_id=chat_id,
-            message_id=message_id,
+            text=result_text,
             parse_mode="HTML",
         )
-    except Exception:
-        try:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=final_text,
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
+    except Exception as error:
+        print(
+            f"Rus ruleti sonuç mesajı gönderilemedi: {error}"
+        )
 
-    # Bu oyuna ait bekleyen bahis seçimlerini temizle
-    for key, pending in list(PENDING_BETS.items()):
-        if pending.get("game_id") == game_id:
+    # Bekleyen bahis işlemlerini temizle
+    for key, value in list(PENDING_BETS.items()):
+        if value.get("game_id") == game_id:
             PENDING_BETS.pop(key, None)
 
-    # Oyunu kapat
     async with LOCK:
         game = GAMES.get(game_id)
 
         if game:
             game["status"] = "closed"
             GAMES.pop(game_id, None)
+    
