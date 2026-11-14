@@ -110,6 +110,9 @@ async def help_navigation(callback: CallbackQuery):
             "/mines - Mayın oyunu\n"
             "/rocket - Roket oyunu\n"
             "/evenodd - Tek / Çift oyunu\n\n"
+            "🔢 <b>Sayı Tahmin Oyunu</b>\n"
+            "/sayi - 1-100 arasındaki sayıyı tahmin et\n"
+            "🏆 İlk doğru tahmine 200.000 kredi ödül!\n\n"
             "🔫 <b>Grup Rus Ruleti</b>\n"
             "/kayit - Kullanıcı adını davetler için kaydet\n"
             "/rulet @username - Grupta oyuncuya düello daveti gönder\n"
@@ -140,3 +143,4 @@ async def help_navigation(callback: CallbackQuery):
         )
 
     await callback.answer()
+    
