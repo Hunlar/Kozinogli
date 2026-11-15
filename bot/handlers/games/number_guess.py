@@ -1,3 +1,4 @@
+
 import asyncio
 import random
 import uuid
@@ -15,7 +16,7 @@ router = Router()
 
 PRIZE = 200_000
 MIN_NUMBER = 1
-MAX_NUMBER = 100
+MAX_NUMBER = 1000
 GAME_TIMEOUT = 300  # 5 dakika
 
 # Her grup için ayrı oyun
@@ -60,12 +61,12 @@ async def start_number_game(message: Message):
 
     await message.answer(
         "🎯 <b>SAYI TAHMİN OYUNU BAŞLADI!</b>\n\n"
-        "1 ile 100 arasında bir sayı tuttum.\n"
+        "1 ile 1000 arasında bir sayı tuttum.\n"
         "Herkes tahminini gruba yazabilir.\n\n"
         "⬆️ Daha yüksek\n"
         "⬇️ Daha düşük\n\n"
         "🏆 İlk doğru tahmini yapan:\n"
-        "💰 <b>200.000 SANAL KREDİ</b> kazanacak!\n\n"
+        "💰 <b>200.000 ÖzLira</b> kazanacak!\n\n"
         "⏳ Süre: 5 dakika",
         parse_mode="HTML",
     )
@@ -100,7 +101,7 @@ async def end_game_after_timeout(chat_id: int, game_id: str, bot):
     )
 
 
-@router.message(F.text.regexp(r"^\d{1,3}$"))
+@router.message(F.text.regexp(r"^\d{1,4}$"))
 async def guess_number(message: Message):
 
     if message.chat.type not in ("group", "supergroup"):
@@ -152,7 +153,7 @@ async def guess_number(message: Message):
                 )
                 return
 
-            # Kazanana 200.000 kredi ekle.
+            # Kazanana 200.000 ÖzLira ekle.
             user.balance += PRIZE
 
             await session.commit()
@@ -166,7 +167,8 @@ async def guess_number(message: Message):
         "🎉 <b>DOĞRU TAHMİN!</b>\n\n"
         f"🏆 Kazanan: <b>{winner_name}</b>\n"
         f"🔢 Doğru sayı: <b>{guess}</b>\n\n"
-        f"💰 Ödül: <b>{PRIZE:,} kredi</b>\n\n"
+        f"💰 Ödül: <b>{PRIZE:,} ÖzLira</b>\n\n"
         "Yeni oyun için /sayi yazabilirsiniz.",
         parse_mode="HTML",
     )
+    
