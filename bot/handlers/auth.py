@@ -1,3 +1,4 @@
+
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -18,6 +19,8 @@ ISTANBUL = ZoneInfo("Europe/Istanbul")
 DAILY_CREDIT = 20_000
 
 BANK_OWNER_TG_ID = 8658946296
+
+START_IMAGE = "https://graph.org/file/876f7b95f00e9e557bfd8.jpg"
 
 
 @router.message(Command("start"))
@@ -89,7 +92,8 @@ async def start_command(
 
         await session.commit()
 
-    await message.answer(
-        welcome_text,
+    await message.answer_photo(
+        photo=START_IMAGE,
+        caption=welcome_text,
         reply_markup=ReplyKeyboardRemove()
     )
