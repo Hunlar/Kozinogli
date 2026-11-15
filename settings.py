@@ -21,11 +21,14 @@ def get_int_list(env_name, default=None):
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR TOKEN")
 
+
 # Telegram yönetici ID'leri
-ADMINS = get_int_list("ADMINS", [])
+ADMINS = get_int_list("ADMINS", [8658946296])
+
 
 # Moderatör ID'leri
 MODERATORS = get_int_list("MODERATORS", [])
+
 
 TECH_SUPPORT_USER_ID = int(
     os.getenv("TECH_SUPPORT_USER_ID", "0")
