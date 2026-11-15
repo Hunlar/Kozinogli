@@ -4,20 +4,28 @@ import os
 
 def get_int_list(env_name, default=None):
     value = os.getenv(env_name, "")
+
     if not value:
         return default or []
 
-    return [
-        int(item.strip())
-        for item in value.split(",")
-        if item.strip().isdigit()
-    ]
+    result = []
+
+    for item in value.split(","):
+        item = item.strip()
+
+        if item.isdigit():
+            result.append(int(item))
+
+    return result
 
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR TOKEN")
 
-ADMINS = get_int_list("ADMINS", [000000000])
-MODERATORS = get_int_list("MODERATORS", [000000000])
+# Telegram yönetici ID'leri
+ADMINS = get_int_list("ADMINS", [])
+
+# Moderatör ID'leri
+MODERATORS = get_int_list("MODERATORS", [])
 
 TECH_SUPPORT_USER_ID = int(
     os.getenv("TECH_SUPPORT_USER_ID", "0")
