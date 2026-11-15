@@ -9,17 +9,13 @@ from aiogram.types import (
     InlineKeyboardButton
 )
 
+from settings import ADMINS
+
 router = Router()
 logger = logging.getLogger(__name__)
 
-# Zorunlu üyelik sohbetleri
-REQUIRED_CHATS = [
-    "@emeklisanalci",
-    -1004326389896
-]
-
-GROUP_INVITE_LINK = "https://t.me/+_XbbelgBCFJkZjk0"
-
+REQUIRED_CHANNEL = -1004326403524
+CHANNEL_USERNAME = "@sancakmain"
 
 def subscription_keyboard():
     return InlineKeyboardMarkup(
@@ -27,13 +23,7 @@ def subscription_keyboard():
             [
                 InlineKeyboardButton(
                     text="📢 Kanalımıza Katıl",
-                    url="https://t.me/emeklisanalci"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="👥 Grubumuza Katıl",
-                    url=GROUP_INVITE_LINK
+                    url="https://t.me/sancakmain"
                 )
             ],
             [
@@ -47,28 +37,26 @@ def subscription_keyboard():
 
 
 async def check_membership(bot, user_id: int) -> bool:
-    for chat in REQUIRED_CHATS:
-        try:
-            member = await bot.get_chat_member(
-                chat_id=chat,
-                user_id=user_id
-            )
+    try:
+        member = await bot.get_chat_member(
+            chat_id=REQUIRED_CHANNEL,
+            user_id=user_id
+        )
 
-            status = member.status
+        if member.status in ("creator", "administrator", "member"):
+            return True
 
-            if status not in ("creator", "administrator", "member"):
-                if status != "restricted" or not member.is_member:
-                    return False
+        if member.status == "restricted" and member.is_member:
+            return True
 
-        except Exception:
-            logger.exception(
-                "Üyelik kontrolü başarısız: %s / %s",
-                user_id,
-                chat
-            )
-            return False
+        return False
 
-    return True
+    except Exception:
+        logger.exception(
+            "Kanal üyeliği kontrol edilemedi: %s",
+            user_id
+        )
+        return False
 
 
 class SubscriptionMiddleware(BaseMiddleware):
@@ -80,7 +68,6 @@ class SubscriptionMiddleware(BaseMiddleware):
         if user is None:
             return await handler(event, data)
 
-        # Sohbet türünü belirle
         chat_type = None
 
         if isinstance(event, Message):
@@ -90,15 +77,16 @@ class SubscriptionMiddleware(BaseMiddleware):
             if event.message:
                 chat_type = event.message.chat.type
 
-        # Grup ve süper gruplarda üyelik kontrolünü tamamen atla
         if chat_type in ("group", "supergroup"):
             return await handler(event, data)
 
-        # Yalnızca özel sohbetlerde üyelik kontrolü yap
         if chat_type != "private":
             return await handler(event, data)
 
-        # Üyelik kontrol butonunun kendi handler'ı çalışabilsin
+        # Adminler zorunlu abonelikten muaftır.
+        if user.id in ADMINS:
+            return await handler(event, data)
+
         if (
             isinstance(event, CallbackQuery)
             and event.data == "check_subscription"
@@ -112,10 +100,9 @@ class SubscriptionMiddleware(BaseMiddleware):
 
         text = (
             "🔒 **ÖzVeGas'a Devam Etmek İçin**\n\n"
-            "Kanalımıza ve grubumuza katılmalısın.\n\n"
-            "1. Kanalımıza katıl.\n"
-            "2. Grubumuza katıl.\n"
-            "3. Üyeliğini kontrol et."
+            "Devam etmek için @sancakmain kanalımıza "
+            "katılmalısın.\n\n"
+            "Katıldıktan sonra üyeliğini kontrol et."
         )
 
         if isinstance(event, Message):
@@ -143,12 +130,18 @@ class SubscriptionMiddleware(BaseMiddleware):
 )
 async def verify_subscription(callback: CallbackQuery):
 
-    # Üyelik kontrolü yalnızca özel sohbetlerde yapılır
     if (
         callback.message is None
         or callback.message.chat.type != "private"
     ):
         await callback.answer()
+        return
+
+    if callback.from_user.id in ADMINS:
+        await callback.answer(
+            "Admin erişimi açık.",
+            show_alert=True
+        )
         return
 
     is_member = await check_membership(
@@ -163,13 +156,13 @@ async def verify_subscription(callback: CallbackQuery):
         )
 
         await callback.message.edit_text(
-            "✅ Kanal ve grup üyeliğin doğrulandı!\n\n"
+            "✅ @sancakmain kanal üyeliğin doğrulandı!\n\n"
             "ÖzVeGas'ı kullanmak için /start komutunu gönder."
         )
 
     else:
         await callback.answer(
-            "❌ Henüz kanal veya grup üyeliğin tamamlanmamış.",
+            "❌ Henüz kanala katılmamışsın.",
             show_alert=True
-            )
+        )
         
