@@ -1,4 +1,3 @@
-
 import asyncio
 import math
 import random
@@ -458,7 +457,7 @@ async def roulette_callback(callback: CallbackQuery):
                 "📢 Bahisler başladı!\n"
                 "💰 Gruptaki herkes bahis yapabilir.\n"
                 f"⏳ Bahis süresi: {BETTING_SECONDS} saniye",
-                parse_mode="HTML",
+                            parse_mode="HTML",
             )
 
         asyncio.create_task(
@@ -557,7 +556,7 @@ async def roulette_callback(callback: CallbackQuery):
         "Bilinmeyen işlem.",
         show_alert=True
     )
-    
+
 @router.message()
 async def handle_bet_amount(message: Message):
     remember_group_user(message)
@@ -846,4 +845,3 @@ async def close_betting(game_id, bot):
         if game:
             game["status"] = "closed"
             GAMES.pop(game_id, None)
-    
