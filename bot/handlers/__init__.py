@@ -1,8 +1,11 @@
+
 from bot.middlewares.bankruptcy import BankruptcyMiddleware
 from bot.middlewares.start_required import StartRequiredMiddleware
 
 
 def setup_handlers(dp):
+
+    from bot.handlers.admin_handlers import router as admin_router
 
     from bot.handlers.auth import router as auth_router
     from bot.handlers.common import router as common_router
@@ -17,20 +20,17 @@ def setup_handlers(dp):
     from bot.handlers.games.crash import router as crash_router
     from bot.handlers.games.even_odd import router as even_odd_router
 
-    # Grup Rus ruleti
     from bot.handlers.games.group_russian_roulette import router as group_russian_roulette_router
-
-    # Sayı tahmin oyunu
     from bot.handlers.games.number_guess import router as number_guess_router
 
     from bot.handlers.bonuses import router as bonuses_router
     from bot.handlers.support import router as support_router
-    from bot.handlers.admin_handlers import router as admin_router
 
-    # Bota özelden /start vermeyenleri grup mesajlarında engelle.
+    # Middleware kayıtları
     dp.message.middleware(StartRequiredMiddleware())
     dp.callback_query.middleware(StartRequiredMiddleware())
 
+    # Oyun routerları
     game_routers = [
         slots_router,
         roulette_router,
@@ -47,10 +47,15 @@ def setup_handlers(dp):
         game_router.message.middleware(BankruptcyMiddleware())
         game_router.callback_query.middleware(BankruptcyMiddleware())
 
+    # ÖNEMLİ:
+    # Admin router bütün genel mesaj yakalayıcılarından önce ekleniyor.
+    dp.include_router(admin_router)
+
     dp.include_router(auth_router)
     dp.include_router(common_router)
     dp.include_router(profile_router)
     dp.include_router(debt_router)
+
     dp.include_router(games_menu_router)
 
     for game_router in game_routers:
@@ -58,4 +63,4 @@ def setup_handlers(dp):
 
     dp.include_router(bonuses_router)
     dp.include_router(support_router)
-    dp.include_router(admin_router)
+    
