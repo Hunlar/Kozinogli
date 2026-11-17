@@ -1,7 +1,5 @@
 
-import os
 import logging
-import html
 
 from aiogram import Bot
 from sqlalchemy import select
@@ -11,11 +9,6 @@ from db.models import User
 
 
 BANKRUPTCY_LIMIT = 4000
-
-BANKRUPTCY_VIDEO_FILE_ID = os.getenv(
-    "BANKRUPTCY_VIDEO_FILE_ID",
-    ""
-)
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +20,12 @@ async def check_bankruptcy(
     chat_type: str,
     first_name: str
 ):
-    announcement_chat_id = None
-    should_announce = False
+
+    should_notify = False
     balance = 0
 
     async with AsyncSessionLocal() as session:
+
         result = await session.execute(
             select(User)
             .where(User.tg_id == telegram_id)
@@ -52,64 +46,54 @@ async def check_bankruptcy(
             await session.commit()
             return
 
+        # İlk kez iflas ediyorsa bildirimi hazırla.
         if not user.is_bankrupt:
             user.is_bankrupt = True
 
-            if chat_type in ("group", "supergroup"):
-                user.bankruptcy_chat_id = chat_id
-
-        announcement_chat_id = user.bankruptcy_chat_id
-
-        if (
-            announcement_chat_id is not None
-            and not user.bankruptcy_announced
-        ):
-            user.bankruptcy_announced = True
-            should_announce = True
+            if not user.bankruptcy_announced:
+                user.bankruptcy_announced = True
+                should_notify = True
 
         await session.commit()
 
-    if not should_announce:
+    if not should_notify:
         return
 
-    safe_name = html.escape(first_name or "Oyuncu")
-
     text = (
-        "🚨 <b>ÖZVEGAS İFLAS HABERİ!</b> 🚨\n\n"
-        f"🎭 <a href=\"tg://user?id={telegram_id}\">{safe_name}</a> "
-        "oyun masasında iflas etti!\n\n"
-        f"💸 Kalan bakiye: <b>{balance:,.2f} Sanal Kredi</b>\n"
-        "🏦 Kurtuluş için ÖzVeGas kasasından borç alması gerekiyor.\n\n"
-        "😂 Kolpaçino ekibi bu iflası unutmayacak!"
+        "🚨 <b>ÖZVEGAS İFLAS BİLDİRİMİ</b>\n\n"
+        "💸 Hesabın iflas etti!\n\n"
+        f"🪙 Mevcut bakiyen: <b>{balance:,.2f}</b>\n"
+        f"📉 İflas sınırı: <b>{BANKRUPTCY_LIMIT:,}</b>\n\n"
+        "Yeni oyunlara başlayabilmek için "
+        "ÖzVeGas kasasından borç almalısın.\n\n"
+        "🏦 Borç almak için: /borc\n"
+        "📋 Borçlarını görmek için: /borclarim"
     )
 
     try:
+        # Yalnızca iflas eden kullanıcıya özel mesaj.
         await bot.send_message(
-            chat_id=announcement_chat_id,
+            chat_id=telegram_id,
             text=text,
             parse_mode="HTML"
         )
 
-        if BANKRUPTCY_VIDEO_FILE_ID:
-            await bot.send_video(
-                chat_id=announcement_chat_id,
-                video=BANKRUPTCY_VIDEO_FILE_ID,
-                caption="🎬 ÖzVeGas iflas arşivinden özel gösterim!"
-            )
-
     except Exception:
         logger.exception(
-            "İflas duyurusu gönderilemedi: %s",
-            announcement_chat_id
+            "Özel iflas bildirimi gönderilemedi: %s",
+            telegram_id
         )
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(
-                select(User).where(User.tg_id == telegram_id)
+                select(User).where(
+                    User.tg_id == telegram_id
+                )
             )
+
             user = result.scalar_one_or_none()
 
             if user is not None:
                 user.bankruptcy_announced = False
                 await session.commit()
-      
+                
