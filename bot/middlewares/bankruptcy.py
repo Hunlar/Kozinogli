@@ -9,7 +9,6 @@ from db.models import User
 
 BANKRUPTCY_LIMIT = 4000
 
-
 ACTIVE_GAME_STATES = {
     "BlackjackStates:PLAYER_TURN",
     "MinesStates:CHOOSE_MINES",
@@ -29,13 +28,10 @@ class BankruptcyMiddleware(BaseMiddleware):
         if telegram_user is None:
             return await handler(event, data)
 
-        # Mesajın grup veya özel sohbet olduğunu belirle.
         if isinstance(event, Message):
             chat_type = event.chat.type
-
         elif isinstance(event, CallbackQuery) and event.message:
             chat_type = event.message.chat.type
-
         else:
             chat_type = None
 
@@ -48,20 +44,16 @@ class BankruptcyMiddleware(BaseMiddleware):
 
             user = result.scalar_one_or_none()
 
-            # Botu özelden başlatmamış kullanıcıyı
-            # grup oyunlarında tamamen görmezden gel.
             if chat_type in ("group", "supergroup"):
                 if user is None or not user.has_started:
                     return
 
-            # Özel sohbette kayıtlı olmayan kullanıcıyı
-            # mevcut handler'ın yönetmesine izin ver.
             if user is None:
                 return await handler(event, data)
 
             balance = user.balance or 0
+            is_bankrupt = user.is_bankrupt
 
-        # Devam eden oyunun tamamlanmasına izin ver.
         fsm_state = data.get("state")
 
         if fsm_state is not None:
@@ -70,34 +62,23 @@ class BankruptcyMiddleware(BaseMiddleware):
 
                 if current_state in ACTIVE_GAME_STATES:
                     return await handler(event, data)
-
             except Exception:
                 pass
 
-        if balance < BANKRUPTCY_LIMIT:
+        if balance < BANKRUPTCY_LIMIT or is_bankrupt:
 
-            warning = (
-                "💸 İFLAS ETTİN!\n\n"
-                f"🪙 Mevcut bakiyen: {balance:,.2f} "
-                "Sanal Kredi\n"
-                f"📉 İflas sınırı: {BANKRUPTCY_LIMIT:,} "
-                "Sanal Kredi\n\n"
-                "Yeni oyunlara başlayabilmek için "
-                "ÖzVeGas kasasından borç almalısın.\n\n"
-                "🏦 Borç işlemi: /borc\n"
-                "📋 Borçlarını görüntüle: /borclarim"
-            )
+            # Sohbete iflas mesajı gönderme.
+            # İflas bildirimi özelden check_bankruptcy
+            # fonksiyonu tarafından yalnızca bir defa gönderilir.
 
-            if isinstance(event, Message):
-                await event.answer(warning)
-
-            elif isinstance(event, CallbackQuery):
+            if isinstance(event, CallbackQuery):
                 await event.answer(
-                    "💸 İflas ettin! Yeni oyunlara "
-                    "başlamak için borç almalısın.",
+                    "💸 İflas durumundasın. "
+                    "Yeni oyun için /borc komutunu kullan.",
                     show_alert=True
                 )
 
             return
 
         return await handler(event, data)
+        
